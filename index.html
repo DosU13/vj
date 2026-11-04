@@ -1,15 +1,241 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Twilight Lantern Forest</title>
-  <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; }
-    iframe { border: 0; width: 100%; height: 100%; display: block; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>VJ</title>
+<style>
+  :root {
+    --ink: #f3f0e8;
+    --ink-soft: rgba(243, 240, 232, 0.62);
+    --ink-faint: rgba(243, 240, 232, 0.42);
+    --glass: rgba(10, 10, 14, 0.3);
+    --glass-edge: rgba(255, 255, 255, 0.12);
+    --hover: rgba(255, 255, 255, 0.08);
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
+  body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
+  /* The VJ fills the page. While the menu is open it sinks back: blurred, darker, slightly zoomed. */
+  #vj {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    display: block; border: 0; background: #000;
+    transition: filter 0.45s ease, transform 0.45s ease;
+  }
+  .menu-open #vj { filter: blur(16px) brightness(0.4) saturate(1.2); transform: scale(1.06); }
+
+  /* The menu is a see-through dialog over the whole page; a click on its empty space closes it.
+     As a modal dialog it also shows above a VJ that went fullscreen. */
+  #menu {
+    box-sizing: border-box; position: fixed; inset: 0;
+    width: 100%; height: 100%; max-width: none; max-height: none;
+    margin: 0; padding: 24px 16px; border: 0;
+    display: flex; overflow-y: auto;
+    background: transparent; color: var(--ink); color-scheme: dark;
+    font: 400 15px/1.4 var(--font);
+  }
+  #menu:not([open]) { display: none; }
+  #menu::backdrop { background: rgba(0, 0, 0, 0.2); }
+  #menu:focus-visible { outline: none; }
+
+  .panel {
+    box-sizing: border-box; margin: auto; width: min(420px, 100%);
+    padding: 18px 10px 12px; border-radius: 22px;
+    background: var(--glass); border: 1px solid var(--glass-edge);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+    animation: menu-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes menu-in { from { opacity: 0; transform: translateY(10px) scale(0.97); } }
+
+  .eyebrow {
+    margin: 0 14px 10px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .item {
+    all: unset; box-sizing: border-box; width: 100%; min-height: 60px;
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: 14px;
+    padding: 12px 14px; border-radius: 14px; cursor: pointer;
+    transition: background-color 0.15s ease, opacity 0.2s ease;
+  }
+  .item:hover { background: var(--hover); }
+  .item:focus-visible { background: var(--hover); outline: 2px solid var(--accent); outline-offset: -2px; }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    box-shadow: inset 0 0 0 1.5px var(--accent); opacity: 0.65;
+    transition: opacity 0.15s ease;
+  }
+  .item:hover .dot, .item:focus-visible .dot { opacity: 1; }
+  .item[aria-current="true"] .dot { background: var(--accent); box-shadow: 0 0 12px var(--accent); opacity: 1; }
+  .name { display: block; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .blurb { display: block; margin-top: 2px; font-size: 13px; color: var(--ink-soft); }
+  .tag {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    white-space: nowrap; color: var(--accent);
+  }
+  .tag:empty { display: none; }
+  @media (max-width: 440px) {
+    .item { grid-template-columns: auto 1fr; }
+    .tag { grid-column: 2; margin-top: 6px; }
+  }
+  .hint { margin: 10px 14px 0; font-size: 12px; text-align: center; color: var(--ink-faint); }
+  .coarse { display: none; }
+  @media (pointer: coarse) { .fine { display: none; } .coarse { display: inline; } }
+
+  /* After a pick, while the next VJ loads */
+  .leaving .item { pointer-events: none; }
+  .leaving .item:not([aria-busy="true"]) { opacity: 0.4; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #vj, .item, .dot { transition: none; }
+    .panel { animation: none; }
+  }
+</style>
 </head>
 <body>
-  <iframe src="twilight-lantern-forest.html" allow="autoplay; fullscreen"></iframe>
+<iframe id="vj" allow="autoplay; fullscreen" allowfullscreen></iframe>
+
+<dialog id="menu" aria-labelledby="menu-title" tabindex="-1" autofocus>
+  <div class="panel">
+    <p class="eyebrow" id="menu-title">Choose a VJ</p>
+    <ul class="list" id="menu-list"></ul>
+    <p class="hint"><span class="fine">Esc or click outside to close</span><span class="coarse">Tap outside to close</span></p>
+  </div>
+</dialog>
+
+<script>
+  // Every VJ this page can show. Plain index.html opens the first one; index.html?vj=<id> opens the others.
+  // Each VJ page loads ../vj-bridge.js in its head (see the top of that file), so a right-click or
+  // long press inside it reaches the menu.
+  const VJS = [
+    {
+      id: 'twilight-lantern-forest',
+      title: 'Twilight Lantern Forest',
+      blurb: 'Bass-reactive forest walk',
+      src: 'twilight-lantern-forest/twilight-lantern-forest.html',
+      accent: '#ff9a3d',
+    },
+    {
+      id: 'europe',
+      title: 'Europe',
+      blurb: 'Coming soon',
+      src: 'europe/europe.html',
+      accent: '#7ea6ff',
+    },
+  ];
+
+  const frame = document.getElementById('vj');
+  const menu = document.getElementById('menu');
+  const list = document.getElementById('menu-list');
+
+  const current = VJS.find((vj) => vj.id === new URLSearchParams(location.search).get('vj')) || VJS[0];
+  document.title = current.title;
+  frame.title = current.title;
+  frame.src = current.src;
+
+  // ---------- menu ----------
+  for (const vj of VJS) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'item';
+    item.style.setProperty('--accent', vj.accent || '#ffffff');
+    item.innerHTML = '<span class="dot"></span><span><span class="name"></span><span class="blurb"></span></span><span class="tag"></span>';
+    item.querySelector('.name').textContent = vj.title;
+    item.querySelector('.blurb').textContent = vj.blurb || '';
+    if (vj === current) {
+      item.setAttribute('aria-current', 'true');
+      item.querySelector('.tag').textContent = 'Now playing';
+    }
+    item.addEventListener('click', () => pick(vj, item));
+    const li = document.createElement('li');
+    li.append(item);
+    list.append(li);
+  }
+
+  let openedAt = 0;
+  function openMenu() {
+    if (menu.open) return;
+    openedAt = performance.now();
+    document.body.classList.add('menu-open');
+    menu.showModal();
+    menu.focus(); // the dialog, not an item: no focus ring until the arrow keys or Tab are used
+  }
+  function closeMenu() {
+    if (menu.open) menu.close();
+  }
+  menu.addEventListener('close', () => {
+    document.body.classList.remove('menu-open');
+    frame.focus(); // keys go back to the VJ
+  });
+
+  // Picking another VJ reloads the page with it.
+  function pick(vj, item) {
+    if (vj === current) return closeMenu();
+    menu.classList.add('leaving');
+    item.setAttribute('aria-busy', 'true');
+    item.querySelector('.tag').textContent = 'Loading…';
+    const url = new URL(location.href);
+    url.hash = '';
+    if (vj === VJS[0]) url.searchParams.delete('vj');
+    else url.searchParams.set('vj', vj.id);
+    location.assign(url.href);
+  }
+
+  // A click on the empty space around the panel closes the menu (but not the one that just opened it).
+  menu.addEventListener('click', (e) => {
+    if (e.target === menu && performance.now() - openedAt > 300) closeMenu();
+  });
+  // Right-click again closes it too; the browser's own menu never shows.
+  addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (menu.open && !e.target.closest('.panel')) closeMenu();
+  });
+  // Arrow keys move between VJs; Enter picks, Esc closes (the dialog handles those two).
+  menu.addEventListener('keydown', (e) => {
+    const items = [...list.querySelectorAll('.item')];
+    const at = items.indexOf(document.activeElement);
+    const next =
+      e.key === 'ArrowDown' ? items[(at + 1) % items.length] :
+      e.key === 'ArrowUp' ? items[at < 0 ? items.length - 1 : (at - 1 + items.length) % items.length] :
+      e.key === 'Home' ? items[0] :
+      e.key === 'End' ? items[items.length - 1] : null;
+    if (next) { e.preventDefault(); next.focus(); }
+  });
+
+  // ---------- talking to the VJ ----------
+  // The VJ's vj-bridge.js sends this on a right-click or long press.
+  addEventListener('message', (e) => {
+    if (e.source === frame.contentWindow && e.data && e.data.vjBridge === 'menu') openMenu();
+  });
+
+  frame.addEventListener('load', () => {
+    // On a web server the VJ is same-origin, so a VJ that forgot its vj-bridge.js line still gets one.
+    try {
+      const win = frame.contentWindow;
+      if (!win.__vjBridge) {
+        const script = win.document.createElement('script');
+        script.src = new URL('vj-bridge.js', location.href).href;
+        (win.document.head || win.document.documentElement).append(script);
+      }
+    } catch {
+      // Opened from disk (file://): the browser keeps the VJ's page out of reach; its own vj-bridge.js line covers it.
+    }
+    if (!menu.open) frame.focus(); // the VJ's keyboard shortcuts work straight away
+  });
+
+  // Coming Back to this page from the history cache: drop the half-finished pick.
+  addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    menu.classList.remove('leaving');
+    for (const item of list.querySelectorAll('[aria-busy]')) {
+      item.removeAttribute('aria-busy');
+      item.querySelector('.tag').textContent = '';
+    }
+    closeMenu();
+  });
+</script>
 </body>
 </html>
