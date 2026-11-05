@@ -679,6 +679,13 @@ const CITIES = {
     walls: ['#e8dbc0', '#e2d3b5', '#dccdae', '#eee4cf', '#e5d8bd'],
     roof: '#7c8790', landmark: 'eiffel',
   },
+  berlin: {
+    name: 'Berlin', country: 'Deutschland', coords: '52.52° N · 13.40° E', ink: '#2b2b2b', shape: 'circle',
+    half: [6.4, 7.8], depth: 15, plot: [11, 19], floors: [4, 5], groundH: 4.6, floorH: 3.5, bayW: 2.5,
+    side: [3.0, 4.0], blocks: [44, 70], viewDist: 190, square: 80, sqHalf: 48, slope: 0,
+    walls: ['#e6d3ac', '#cfd3c4', '#e3bba2', '#d9c793', '#bdb6aa', '#ebe0c9', '#c8a888', '#a9bcb6', '#e8c9a0'],
+    roof: '#94503b', landmark: 'brandenburg',
+  },
 };
 const CITY_IDS = Object.keys(CITIES);
 
@@ -700,7 +707,7 @@ function buildItinerary(an, sched, walk, seed) {
   const order = []; let bag = [];
   for (let k = 0; k < nSeg; k++) {
     if (only && CITIES[only]) { order.push(only); continue; }
-    if (k === 0 && first && CITIES[first]) { order.push(first); continue; }
+    if (k === 0 && first && CITIES[first]) { order.push(first); bag = shuffle(CITY_IDS.filter((c) => c !== first), rng); continue; }
     if (!bag.length) bag = shuffle(CITY_IDS.slice(), rng);
     let c = bag.shift();
     if (c === order[k - 1]) { bag.push(c); c = bag.shift(); }
@@ -746,6 +753,48 @@ function buildItinerary(an, sched, walk, seed) {
       g.landmarkS = g.squareS + g.C.square * 1.15;
     }
   }
+  // House depths. You only walk ~25 m between corners, so street k-1 and street k+1 run side by side that far
+  // apart, with one block between them. The rows backing onto that block share its width; at full depth their
+  // houses would overlap, and where two fronts land on the same wall they flicker against each other.
+  for (const g of segs) g.rowDepth = { '-1': g.depth, '1': g.depth };
+  for (let m = 1; m < nSeg - 1; m++) {
+    const A = segs[m - 1], M = segs[m], N = segs[m + 1];
+    const sa = A.turn.side, sn = M.turn.side; // A's row on its turn side and N's row on M's turn side face each other
+    const avail = M.D - A.half - N.half - 0.3, a = A.rowDepth[sa], b = N.rowDepth[sn];
+    if (a + b <= avail) continue;
+    const room = Math.max(avail, 2);
+    let a2 = room * a / (a + b), b2 = room - a2;
+    if (a2 < 2.4) { a2 = Math.min(2.4, room / 2); b2 = room - a2; } else if (b2 < 2.4) { b2 = Math.min(2.4, room / 2); a2 = room - b2; }
+    A.rowDepth[sa] = Math.min(a, a2); N.rowDepth[sn] = Math.min(b, b2);
+  }
+  for (let k = 0; k < nSeg; k++) {
+    const g = segs[k], prev = segs[k - 1], next = segs[k + 1];
+    if (prev) g.prevDepth = prev.rowDepth[prev.turn.side]; // the corner houses' frontage: the depth of the row you came along
+    if (next) {
+      // the faces you pass at the corner are the sides of the next street's corner houses
+      g.faceW = [next.rowDepth[g.turn.side], next.rowDepth[-g.turn.side]];
+      g.nearEnd = g.D + next.half + g.faceW[1] + 0.02;
+    } else g.nearEnd = Math.min(g.squareS - 1, g.startS + 40);
+  }
+  // A street two corners on that runs the same way as this one sits just beside it; keep this street's square
+  // (seen from the corner while turning) clear of that street's first stretch
+  for (let j = 0; j + 2 < nSeg; j++) {
+    const a = segs[j], b = segs[j + 1], c = segs[j + 2];
+    if (b.turn.side !== -a.turn.side) continue;
+    const reach = a.D + c.nearEnd + 8;
+    if (a.squareS < reach) { const d = reach - a.squareS; a.squareS += d; a.landmarkS += d; }
+  }
+  // While turning to or from Ohrid both far views show at once: the lake starts beyond the neighbouring
+  // city's square, and that city's distant rooftops stay off the water
+  for (const g of segs) if (g.C.lake) {
+    const prev = segs[g.k - 1], next = segs[g.k + 1];
+    g.lakeS = Math.max(g.squareS + 16, next ? g.D + next.C.sqHalf + next.depth + 8 : 0, prev ? prev.C.sqHalf + prev.depth + 8 : 0);
+  }
+  for (let k = 0; k < nSeg; k++) {
+    const g = segs[k], prev = segs[k - 1], next = segs[k + 1];
+    if (next && next.C.lake) { g.lakeSide = g.turn.side; g.lakeAt = next.lakeS - 30; }
+    else if (prev && prev.C.lake) { g.lakeSide = -prev.turn.side; g.lakeAt = prev.lakeS - prev.D - 30; }
+  }
   return { segs, seed };
 }
 // Ground height along a street: an even slope, flat through the corner you turn at and through the square
@@ -769,8 +818,11 @@ function layoutStreet(g) {
     const blocks = [];
     if (g.k > 0) blocks.push({ a: s0, b: s0 + g.prevDepth, type: 'corner', which: side === g.prevSide ? 0 : 1 });
     if (g.turn && side === g.turn.side) {
-      const wN = g.nextHalf, dN = g.nextDepth, D = g.D;
-      blocks.push({ a: D - wN - dN, b: D - wN, type: 'face', which: 0 }, { a: D - wN, b: D + wN, type: 'gap' }, { a: D + wN, b: D + wN + dN, type: 'face', which: 1 });
+      const wN = g.nextHalf, D = g.D;
+      blocks.push({ a: D - wN - g.faceW[0], b: D - wN, type: 'face', which: 0 }, { a: D - wN, b: D + wN, type: 'gap' }, { a: D + wN, b: D + wN + g.faceW[1], type: 'face', which: 1 });
+      // a sliver left between the corner house and the face: the corner house takes it
+      const cb = blocks.find((q) => q.type === 'corner'), fa = D - wN - g.faceW[0];
+      if (cb && fa > cb.b && fa - cb.b < 3.2) cb.b = fa;
     }
     let s = s0 + (g.k > 0 ? g.prevDepth : 0) + rngRange(rng, 10, 30);
     while (s < sEnd - 24) {
@@ -803,6 +855,8 @@ function layoutStreet(g) {
         if (q.type === 'stub') {
           const H = rngRange(rng, C.groundH + C.floorH * C.floors[0], C.groundH + C.floorH * (C.floors[1] + 0.6));
           const h = makeHouse(g, rng, side, q.a, q.b, { floors: floorsFor(H), H }); h.nb0 = 99; h.nb1 = 99;
+          // the wall closing the lane stands inside this row's depth, so it never reaches the block behind
+          const rd = g.rowDepth[side]; h.depth = Math.min(1.2, rd * 0.4); h.lat = Math.max(0.6, rd - h.depth);
           stubs.push({ side, a: q.a, b: q.b, H, house: h });
         }
       }
@@ -841,7 +895,7 @@ function makeHouse(g, rng, side, s0, s1, fixed) {
   const wall = hex(pick(rng, C.walls)).offsetHSL(rngRange(rng, -0.012, 0.012), rngRange(rng, -0.05, 0.03), rngRange(rng, -0.04, 0.03));
   const nb = Math.max(1, Math.round(w / C.bayW));
   return {
-    side, s0, s1, w, floors, H, yb, depth: g.depth, wall,
+    side, s0, s1, w, floors, H, yb, depth: g.rowDepth ? g.rowDepth[side] : g.depth, wall,
     acc: hex(pick(rng, S.shutterCols)).offsetHSL(0, rngRange(rng, -0.05, 0.05), rngRange(rng, -0.05, 0.04)),
     roof: hex(C.roof).offsetHSL(rngRange(rng, -0.012, 0.012), rngRange(rng, -0.08, 0.04), rngRange(rng, -0.07, 0.05)),
     code: pick(rng, S.codes), seed: Math.floor(rng() * 16777215),
@@ -1016,6 +1070,22 @@ const STYLE = {
     cornice: { h: 0.2, d: 0.15 }, eaves: 0.8, roofType: 'hip', roofPitch: 0.42, tile: 'clay',
     ground_pattern: 'cobble', groundTint: '#a39a8e',
   },
+  berlin: {
+    // Gründerzeit apartment blocks: tall windows in stucco surrounds, iron balconies, shops and a carriage gate below
+    signs: ['SPÄTI', 'BÄCKEREI', 'KNEIPE', 'IMBISS', 'APOTHEKE', 'CAFÉ', 'BUCHHANDLUNG', 'BLUMEN', 'KIOSK', 'CURRYWURST'],
+    signCols: [['#1b1b1b', '#f2d24a'], ['#2a3b2e', '#efe2c0'], ['#7a1d22', '#f3e7cf'], ['#e9e2d2', '#1b1b1b'], ['#1d3f6e', '#f3e7cf']], serif: false,
+    frame: '#f5eee0', frameAlpha: 0.65, shutterCols: ['#6b6b62'], patina: 0.45, plinth: '#a9a397', rustic: true,
+    ground: ['shop', 'cafe', 'door', 'shop', 'gate', 'shop', 'window', 'shop'],
+    rows: [null,
+      { w: 0.4, h: 0.64, y: 0.14, top: 'flat', hood: 'tri', frame: 12, sill: 1, shut: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], rail: [0, 0, 0, 0, 0, 0, 0, 0], box: [0, 1, 0, 0, 0, 0, 1, 0], mullion: 1, transom: 0.74 },
+      { w: 0.4, h: 0.64, y: 0.14, top: 'flat', hood: 'cornice', frame: 12, sill: 1, shut: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], rail: [0, 0, 0, 0, 0, 0, 0, 0], box: [0, 0, 0, 1, 0, 0, 0, 0], mullion: 1, transom: 0.74 },
+      { w: 0.4, h: 0.62, y: 0.15, top: 'seg', hood: 'seg', frame: 12, sill: 1, ears: 1, shut: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], rail: [0, 0, 0, 0, 0, 0, 0, 0], box: [0, 0, 0, 0, 0, 1, 0, 0], mullion: 1, transom: 0.72 },
+      BASE_STYLE.rows[4],
+    ],
+    bands: 1, pilasters: 0.25, codes: [1, 3, 1, 0, 3], attic: true, balconies: [1, 2, 3], balconyMid: true,
+    cornice: { h: 0.75, d: 0.55 }, eaves: 0, roofType: 'hip', roofPitch: 0.45, tile: 'clay',
+    ground_pattern: 'slabs', groundTint: '#8e8a85', walkway: 3.0,
+  },
 };
 for (const id of CITY_IDS) STYLE[id] = { ...BASE_STYLE, ...(STYLE[id] || {}), rows: (STYLE[id] && STYLE[id].rows) || BASE_STYLE.rows };
 
@@ -1023,10 +1093,15 @@ for (const id of CITY_IDS) STYLE[id] = { ...BASE_STYLE, ...(STYLE[id] || {}), ro
 const ATLAS = { cols: 8, rows: 5, cw: 256, ch: 320 };
 ATLAS.w = ATLAS.cols * ATLAS.cw; ATLAS.h = ATLAS.rows * ATLAS.ch;
 const gray = (v) => `rgb(${v},${v},${v})`;
+const PAINT_POOL = { owner: null, hc: null, gc: null, tc: null };
 class Painter {
-  constructor(w, h) {
+  constructor(w, h, owner) {
     const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-    this.cc = mk(); this.hc = mk(); this.gc = mk(); this.tc = mk();
+    this.cc = mk();
+    if (!PAINT_POOL.owner && owner) { // (shared between cities: only the colour canvas outlives the painting)
+      PAINT_POOL.owner = owner; this.owner = owner;
+      this.hc = PAINT_POOL.hc || (PAINT_POOL.hc = mk()); this.gc = PAINT_POOL.gc || (PAINT_POOL.gc = mk()); this.tc = PAINT_POOL.tc || (PAINT_POOL.tc = mk());
+    } else { this.hc = mk(); this.gc = mk(); this.tc = mk(); }
     const cpu = { willReadFrequently: true }; // these three are read back, so keep them on the CPU
     this.C = this.cc.getContext('2d'); this.Hh = this.hc.getContext('2d', cpu); this.G = this.gc.getContext('2d', cpu); this.T = this.tc.getContext('2d', cpu);
     this.w = w; this.h = h;
@@ -1158,7 +1233,7 @@ function paintGround(p, S, kind, rng, cw, ch) {
 // Paints a city's atlas as a generator (a few cells per frame); `done` receives { color, detail } canvases + metadata
 function* paintAtlasGen(city, out) {
   const S = STYLE[city], { cols, rows, cw, ch } = ATLAS;
-  const p = new Painter(ATLAS.w, ATLAS.h), rng = mulberry32(hashInt(CITY_IDS.indexOf(city) + 1, 999));
+  const p = new Painter(ATLAS.w, ATLAS.h, out), rng = mulberry32(hashInt(CITY_IDS.indexOf(city) + 1, 999));
   yield* p.clearLayers();
   const meta = [];
   for (let r = 0; r < rows; r++) {
@@ -1208,6 +1283,7 @@ function* paintAtlasGen(city, out) {
     yield;
   }
   out.color = p.cc; out.detail = dd; out.meta = meta;
+  if (PAINT_POOL.owner === out) PAINT_POOL.owner = null;
 }
 
 /* ---------- light per city: time of day, sky, haze, grade ---------- */
@@ -1221,6 +1297,8 @@ const LIGHT = {
   cluj: { sunEl: 5, sunAz: 115, sun: '#ff9f5e', sunI: 3.3, sky: '#5a73b4', horizon: '#f6b98e', glow: '#ff9a5a', hemi: '#9aa4cc', bounce: '#b97a58', hemiI: 1.0, fog: '#e8b796', fogD: 0.0021, exp: 1.08, sat: 1.1, lift: '#0e0709', gain: '#fff0dc', evening: 0.55, clouds: 0.35, stars: 0 },
   istanbul: { sunEl: 4, sunAz: 42, sun: '#ff8a58', sunI: 3.0, sky: '#5b5d9e', horizon: '#ffad86', glow: '#ff8a62', hemi: '#a597c4', bounce: '#c27a62', hemiI: 1.05, fog: '#e9a38f', fogD: 0.0016, exp: 1.1, sat: 1.12, lift: '#100810', gain: '#ffeee0', evening: 0.6, clouds: 0.5, stars: 0 },
   ohrid: { sunEl: 13, sunAz: 205, sun: '#ffe2b8', sunI: 3.4, sky: '#7fa6d6', horizon: '#e4e2dc', glow: '#ffe0b4', hemi: '#b4c6e0', bounce: '#b8a690', hemiI: 1.05, fog: '#dfe1e2', fogD: 0.0011, exp: 1.02, sat: 1.0, lift: '#06080c', gain: '#f6f6f4', evening: 0.0, clouds: 0.2, stars: 0 },
+  // a fresh summer morning: low sun over your shoulder, a pale sky, a little mist down the boulevard
+  berlin: { sunEl: 10, sunAz: 152, sun: '#ffdcaa', sunI: 3.7, sky: '#7da2d3', horizon: '#eee2d0', glow: '#ffd6a0', hemi: '#b0c0da', bounce: '#b49a80', hemiI: 1.0, fog: '#e2e2de', fogD: 0.0019, exp: 1.02, sat: 1.04, lift: '#07090d', gain: '#fbf6ee', evening: 0.0, clouds: 0.5, stars: 0 },
 };
 
 /* =====================================================================
@@ -1546,33 +1624,56 @@ const W = (g, s, x, y) => [g.ox + g.fx * s + g.rx * x, y, g.oz + g.fz * s + g.rz
 /* =====================================================================
    Street geometry (built a slice at a time so walking never stutters)
    ===================================================================== */
+// A growable typed array (doubling): building a street this way makes far less garbage than plain arrays
+class TBuf {
+  constructor(T = Float32Array, cap = 4096) { this.T = T; this.a = new T(cap); this.n = 0; }
+  need(k) {
+    if (this.n + k <= this.a.length) return this.a;
+    let c = this.a.length * 2; while (c < this.n + k) c *= 2;
+    const b = new this.T(c); b.set(this.a.subarray(0, this.n)); return (this.a = b);
+  }
+  view() { return this.a.subarray(0, this.n); }
+}
+// once a buffer is on the GPU the CPU copy is not needed again
+function dropArray() { this.array = null; }
 // Collects one mesh's vertices; extra attributes are given per quad, either one value for all four corners or one per corner
 class GB {
-  constructor(attrs = {}) { this.attrs = attrs; this.ex = {}; for (const k in attrs) this.ex[k] = []; this.p = []; this.n = []; this.c = []; this.idx = []; this.vc = 0; }
+  constructor(attrs = {}) {
+    this.attrs = attrs; this.ex = {}; for (const k in attrs) this.ex[k] = new TBuf(Float32Array, 1024 * attrs[k]);
+    this.p = new TBuf(); this.n = new TBuf(); this.c = new TBuf(); this.idx = new TBuf(Uint32Array, 2048); this.vc = 0;
+  }
   _ex(ex, nv) {
     for (const k in this.attrs) {
-      const size = this.attrs[k], v = ex && ex[k], arr = this.ex[k];
+      const size = this.attrs[k], v = ex && ex[k], B = this.ex[k], a = B.need(nv * size);
       for (let i = 0; i < nv; i++) {
         const val = v == null ? null : Array.isArray(v[0]) ? v[i] : v;
-        for (let j = 0; j < size; j++) arr.push(val ? (val[j] ?? 0) : 0);
+        for (let j = 0; j < size; j++) a[B.n++] = val ? (val[j] ?? 0) : 0;
       }
     }
+  }
+  _vert(q, nx, ny, nz, col) {
+    const P = this.p, N = this.n, C = this.c, pa = P.need(3), na = N.need(3), ca = C.need(3);
+    pa[P.n++] = q[0]; pa[P.n++] = q[1]; pa[P.n++] = q[2];
+    na[N.n++] = nx; na[N.n++] = ny; na[N.n++] = nz;
+    ca[C.n++] = col.r; ca[C.n++] = col.g; ca[C.n++] = col.b;
   }
   quad(a, b, c, d, col, ex) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
     const v = this.vc;
-    for (const q of [a, b, c, d]) { this.p.push(q[0], q[1], q[2]); this.n.push(nx, ny, nz); this.c.push(col.r, col.g, col.b); }
+    this._vert(a, nx, ny, nz, col); this._vert(b, nx, ny, nz, col); this._vert(c, nx, ny, nz, col); this._vert(d, nx, ny, nz, col);
     this._ex(ex, 4);
-    this.idx.push(v, v + 1, v + 2, v, v + 2, v + 3); this.vc += 4;
+    const I = this.idx, ia = I.need(6);
+    ia[I.n++] = v; ia[I.n++] = v + 1; ia[I.n++] = v + 2; ia[I.n++] = v; ia[I.n++] = v + 2; ia[I.n++] = v + 3; this.vc += 4;
   }
   tri(a, b, c, col, ex) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
     const v = this.vc;
-    for (const q of [a, b, c]) { this.p.push(q[0], q[1], q[2]); this.n.push(nx, ny, nz); this.c.push(col.r, col.g, col.b); }
+    this._vert(a, nx, ny, nz, col); this._vert(b, nx, ny, nz, col); this._vert(c, nx, ny, nz, col);
     this._ex(ex, 3);
-    this.idx.push(v, v + 1, v + 2); this.vc += 3;
+    const I = this.idx, ia = I.need(3);
+    ia[I.n++] = v; ia[I.n++] = v + 1; ia[I.n++] = v + 2; this.vc += 3;
   }
   // an axis-free box: centre, unit axes (along, out, up) and half sizes
   box(cx, cy, cz, ax, ay, az, hx, hy, hz, col, skipBottom = true) {
@@ -1589,12 +1690,13 @@ class GB {
   }
   build() {
     if (!this.vc) return null;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
-    for (const k in this.attrs) geo.setAttribute(k, new THREE.Float32BufferAttribute(this.ex[k], this.attrs[k]));
-    geo.setIndex(this.vc > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
+    const geo = new THREE.BufferGeometry(), attr = (buf, size) => new THREE.BufferAttribute(buf.view(), size).onUpload(dropArray);
+    geo.setAttribute('position', attr(this.p, 3));
+    geo.setAttribute('normal', attr(this.n, 3));
+    geo.setAttribute('color', attr(this.c, 3));
+    for (const k in this.attrs) geo.setAttribute(k, attr(this.ex[k], this.attrs[k]));
+    const iv = this.idx.view();
+    geo.setIndex(new THREE.BufferAttribute(this.vc > 65535 ? iv : new Uint16Array(iv), 1).onUpload(dropArray));
     geo.computeBoundingSphere();
     return geo;
   }
@@ -1707,14 +1809,16 @@ function houseGeo(B, F, h, ctx, opts = {}) {
         }
       }
     }
-    // a balcony along the whole front (Paris 2nd and 5th floors, Budapest 1st)
-    if (bal && !onOriel) {
-      const by = fy + 0.02, out = 0.62;
+    // a balcony along the whole front (Paris 2nd and 5th floors, Budapest 1st), or a stack of small ones
+    // up the middle of the house (Berlin)
+    if (bal && !onOriel && !(S.balconyMid && (W0 < 6 || vhash(h.seed, 31, 7) % 3 === 0))) {
+      const by = fy + 0.02, out = S.balconyMid ? 1.05 : 0.62;
+      const ua = S.balconyMid ? W0 / 2 - Math.min(W0 / 2 - 0.4, bayW * (nb % 2 ? 0.75 : 1.2)) : 0.1, ub = W0 - ua, bw = ub - ua;
       const p = FP(F, W0 / 2, -out / 2, by - 0.08);
-      B.trim.box(p[0], p[1], p[2], dirU, dirN, up, W0 / 2 - 0.1, out / 2, 0.09, shade(frameC, 0.95));
-      const a0 = FP(F, 0.1, -out, by), a1 = FP(F, W0 - 0.1, -out, by), a2 = FP(F, W0 - 0.1, -out, by + 1.02), a3 = FP(F, 0.1, -out, by + 1.02);
-      B.iron.quad(a0, a1, a2, a3, h.wall, { aM: [[0, 0], [W0 - 0.2, 0], [W0 - 0.2, 1], [0, 1]] });
-      for (const [ue, sgn] of [[0.1, -1], [W0 - 0.1, 1]]) {
+      B.trim.box(p[0], p[1], p[2], dirU, dirN, up, bw / 2, out / 2, 0.09, shade(frameC, 0.95));
+      const a0 = FP(F, ua, -out, by), a1 = FP(F, ub, -out, by), a2 = FP(F, ub, -out, by + 1.02), a3 = FP(F, ua, -out, by + 1.02);
+      B.iron.quad(a0, a1, a2, a3, h.wall, { aM: [[0, 0], [bw, 0], [bw, 1], [0, 1]] });
+      for (const ue of [ua, ub]) {
         const q0 = FP(F, ue, 0, by), q1 = FP(F, ue, -out, by), q2 = FP(F, ue, -out, by + 1.02), q3 = FP(F, ue, 0, by + 1.02);
         B.iron.quad(q0, q1, q2, q3, h.wall, { aM: [[0, 0], [out, 0], [out, 1], [0, 1]] });
       }
@@ -1793,7 +1897,7 @@ function roofGeo(B, F, h, ctx, top, ov) {
   }
   // a chimney or two
   if (vhash(h.seed, 3, 3) % 3 !== 0) {
-    const u = 0.8 + (vhash(h.seed, 4, 4) % 1000) / 1000 * (W0 - 1.6), d = half + 0.6 + (vhash(h.seed, 5, 5) % 100) / 100;
+    const u = 0.8 + (vhash(h.seed, 4, 4) % 1000) / 1000 * (W0 - 1.6), d = Math.min(dep - 0.45, half + 0.6 + (vhash(h.seed, 5, 5) % 100) / 100);
     const p = FP(F, u, d, top + rh * 0.7 + 0.5);
     B.trim.box(p[0], p[1], p[2], [F.U[0], 0, F.U[1]], [F.N[0], 0, F.N[1]], [0, 1, 0], 0.32, 0.38, rh * 0.5 + 0.9, shade(h.wall, 0.85));
     const q = FP(F, u, d, top + rh * 1.2 + 1.45);
@@ -1810,6 +1914,7 @@ const AWNING_COLS = {
   cluj: [['#2b4f8f', '#efe6d2'], ['#a8262c', '#a8262c'], ['#efe6d2', '#c46a2c']],
   istanbul: [['#c0262a', '#f3ece0'], ['#1d4f8a', '#f3ece0'], ['#e8b931', '#c0262a']],
   ohrid: [['#efe6d2', '#efe6d2'], ['#3a5a7a', '#efe6d2'], ['#a33a2a', '#efe6d2']],
+  berlin: [['#2c3a2e', '#2c3a2e'], ['#7a1f24', '#efe6d2'], ['#1f2a44', '#1f2a44'], ['#c9a24b', '#c9a24b']],
 };
 function awningGeo(B, F, uC, w, y, h, ctx) {
   const cols = pick(mulberry32(h.seed + Math.round(uC * 10)), AWNING_COLS[ctx.city] || AWNING_COLS.roma).map(hex);
@@ -1830,32 +1935,66 @@ function lanternGeo(B, F, u, y, ctx, h) {
 
 /* ---------- the street: layout → houses → floor → props ---------- */
 function houseCtx(g, A) { return { C: g.C, S: STYLE[g.city], A, city: g.city, half: g.half, lights: [] }; }
+// Each street is built as two meshes: the near part (from its start through the next corner), which shows while
+// that corner is in view, and the far part (the rest of the long street, the square, the landmark), which shows
+// only while you look down this street. Streets a corner or two apart overlap out there, so they never share a frame.
+class SplitGB {
+  constructor(g, cut, near, far) { this.g = g; this.cut = cut; this.n = near; this.f = far; }
+  pick(x, z) { const g = this.g; return (x - g.ox) * g.fx + (z - g.oz) * g.fz > this.cut ? this.f : this.n; }
+  quad(a, b, c, d, col, ex) { this.pick((a[0] + c[0]) / 2, (a[2] + c[2]) / 2).quad(a, b, c, d, col, ex); }
+  tri(a, b, c, col, ex) { this.pick((a[0] + b[0] + c[0]) / 3, (a[2] + b[2] + c[2]) / 3).tri(a, b, c, col, ex); }
+  box(cx, cy, cz, ...rest) { this.pick(cx, cz).box(cx, cy, cz, ...rest); }
+}
+function splitBuilders(g, cut, Bn, Bf) {
+  const B = {};
+  for (const key of ['facade', 'roof', 'trim', 'ground', 'iron', 'cloth', 'glow']) B[key] = new SplitGB(g, cut, Bn[key], Bf[key]);
+  // bulbs are pushed as [x, y, z, phase], wire segments as six numbers
+  const arr = (key) => ({ push(...v) { const p = Array.isArray(v[0]) ? v[0] : v; ((p[0] - g.ox) * g.fx + (p[2] - g.oz) * g.fz > cut ? Bf : Bn)[key].push(...v); } });
+  B.bulbs = arr('bulbs'); B.wires = arr('wires');
+  return B;
+}
+function finishBuilders(B, out) {
+  return (function* () {
+    for (const key of ['facade', 'roof', 'trim', 'ground', 'iron', 'cloth', 'glow', 'water']) if (B[key]) { const geo = B[key].build(); if (geo) out[key] = geo; yield; }
+    if (B.bulbs.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(B.bulbs.flatMap((b) => b.slice(0, 3)), 3));
+      geo.setAttribute('aPh', new THREE.Float32BufferAttribute(B.bulbs.map((b) => b[3]), 1));
+      out.bulbs = geo;
+    }
+    if (B.wires.length) { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(B.wires, 3)); out.wires = geo; }
+  })();
+}
 function* buildStreetGen(g, out, atlas) {
-  const L = layoutStreet(g), B = newBuilders(), ctx = houseCtx(g, atlas);
-  const C = g.C, S = ctx.S, half = g.half, dep = g.depth;
+  const L = layoutStreet(g), ctx = houseCtx(g, atlas);
+  const C = g.C, S = ctx.S, half = g.half, cut = g.nearEnd ?? Infinity;
+  const Bn = newBuilders(), Bf = newBuilders(), B = splitBuilders(g, cut, Bn, Bf);
+  const BH = (a, b) => ((a + b) / 2 > cut ? Bf : Bn);
   let n = 0;
   for (const h of L.houses) {
     const F = rowFrame(g, h.side, h.s0, h.s1, half, h.yb);
-    houseGeo(B, F, h, ctx);
+    houseGeo(BH(h.s0, h.s1), F, h, ctx);
     if (++n % 3 === 0) yield;
   }
   for (const f of L.faces) {
     const h = f.house, F = rowFrame(g, f.side, f.a, f.b, half, h.yb);
-    houseGeo(B, F, h, ctx, { faceOnly: true });
+    houseGeo(Bn, F, h, ctx, { faceOnly: true });
   }
   for (const st of L.stubs) {
-    // the far wall closing a side street, and the floor into it
-    const h = st.house, F = rowFrame(g, st.side, st.a, st.b, half + dep, h.yb);
-    houseGeo(B, F, h, ctx, { lod: true });
-    groundRect(B.ground, g, st.a, st.b, st.side * half, st.side * (half + dep + 0.5), 0);
+    // the far wall closing a side lane, and the floor into it
+    const h = st.house, F = rowFrame(g, st.side, st.a, st.b, half + h.lat, h.yb), Bx = BH(st.a, st.b);
+    houseGeo(Bx, F, h, ctx, { lod: true });
+    groundRect(Bx.ground, g, st.a, st.b, st.side * half, st.side * (half + h.lat + 0.3), 0);
   }
   yield;
   // the square: houses facing it on both sides, the ones closing the street's end, a row far behind the landmark
   const sq = C.sqHalf, ySq = heightAt(g, g.squareS) - 0.3, rng = mulberry32(g.seed ^ 0xabcdef);
-  const sqH = (w) => ({ ...makeHouse(g, rng, 1, 0, w), nb0: 0, nb1: 0 });
+  const sqH = (w) => ({ ...makeHouse(g, rng, 1, 0, w), depth: g.depth, nb0: 0, nb1: 0 });
+  {
+  const B = Bf;
   for (const side of [-1, 1]) {
     let s = g.squareS;
-    const end = C.lake ? g.squareS + 10 : g.landmarkS + 70;
+    const end = C.lake ? g.lakeS - 6 : g.landmarkS + 70;
     while (s < end) {
       const w = Math.min(end - s, rngRange(rng, C.plot[0] * 1.2, C.plot[1] * 1.4)), h = sqH(w); h.w = w; h.yb = ySq;
       houseGeo(B, rowFrame(g, side, s, s + w, sq, ySq), h, ctx, { lod: true });
@@ -1878,6 +2017,7 @@ function* buildStreetGen(g, out, atlas) {
       x += w;
     }
   }
+  }
   yield;
   // the floor: road stones down the middle, pavements or gutters at the sides
   const sg0 = g.k === 0 ? -60 : g.prevHalf, walk = S.walkway || 0, road = walk ? half - walk : half;
@@ -1895,45 +2035,42 @@ function* buildStreetGen(g, out, atlas) {
   }
   if (C.lake) {
     // Ohrid: the lane opens onto a little stone quay, then the lake and the mountains across it
-    groundRect(B.ground, g, g.squareS, g.squareS + 16, -sq, sq, 1, ySq + 0.3);
-    const wy = ySq - 1.2, w0 = W(g, g.squareS + 16, -900, wy), w1 = W(g, g.squareS + 16, 900, wy), w2 = W(g, g.squareS + 1400, 900, wy), w3 = W(g, g.squareS + 1400, -900, wy);
-    B.water = new GB(); B.water.quad(w0, w1, w2, w3, hex('#ffffff'));
-    B.trim.quad(W(g, g.squareS + 16, -sq, wy - 0.5), W(g, g.squareS + 16, sq, wy - 0.5), W(g, g.squareS + 16, sq, ySq + 0.3), W(g, g.squareS + 16, -sq, ySq + 0.3), hex('#b8b0a2'));
+    const lk = g.lakeS;
+    groundRect(Bf.ground, g, g.squareS, lk, -sq, sq, 1, ySq + 0.3);
+    const wy = ySq - 1.2, w0 = W(g, lk, -900, wy), w1 = W(g, lk, 900, wy), w2 = W(g, lk + 1400, 900, wy), w3 = W(g, lk + 1400, -900, wy);
+    Bf.water = new GB(); Bf.water.quad(w0, w1, w2, w3, hex('#ffffff'));
+    Bf.trim.quad(W(g, lk, -sq, wy - 0.5), W(g, lk, sq, wy - 0.5), W(g, lk, sq, ySq + 0.3), W(g, lk, -sq, ySq + 0.3), hex('#b8b0a2'));
     const mr = mulberry32(g.seed ^ 0x777);
     for (const [dist, hgt, col] of [[820, 300, '#6f7f96'], [620, 190, '#7c8aa0']]) {
       let prev = null; const ph = mr() * 10;
       for (let x = -1100; x <= 1100; x += 40) {
         const h = hgt * (0.55 + 0.45 * Math.sin(x * 0.0021 + ph) * Math.sin(x * 0.0007 + ph * 2) + 0.15 * Math.sin(x * 0.011 + ph));
-        const top = W(g, g.squareS + dist, x, wy + h), bot = W(g, g.squareS + dist, x, wy - 5);
-        if (prev) B.trim.quad(prev[1], bot, top, prev[0], hex(col));
+        const top = W(g, lk - 16 + dist, x, wy + h), bot = W(g, lk - 16 + dist, x, wy - 5);
+        if (prev) Bf.trim.quad(prev[1], bot, top, prev[0], hex(col));
         prev = [top, bot];
       }
     }
   } else {
-    groundRect(B.ground, g, g.squareS, g.landmarkS + 90, -sq, sq, 1, ySq + 0.3);
-    // the rest of the city fading into the haze behind the landmark
+    groundRect(Bf.ground, g, g.squareS, g.landmarkS + 90, -sq, sq, 1, ySq + 0.3);
+    // the rest of the city fading into the haze behind the landmark (kept off a neighbouring city's lake)
     const fr = mulberry32(g.seed ^ 0x999), F = { U: [g.rx, g.rz], N: [-g.fx, -g.fz] };
     for (let i = 0; i < 150; i++) {
       const s = g.landmarkS + rngRange(fr, 140, 520), x = rngRange(fr, -380, 380);
       if (Math.abs(x) < 70 && s < g.landmarkS + 220) continue;
+      if (g.lakeSide && x * g.lakeSide > g.lakeAt) continue;
       const hgt = rngRange(fr, 10, 22) + (s - g.landmarkS - 140) * 0.05, w = rngRange(fr, 10, 30);
       const c = shade(hex(pick(fr, C.walls)), 0.8);
       const p = W(g, s, x, ySq + hgt / 2 - 1);
-      B.trim.box(p[0], p[1], p[2], [F.U[0], 0, F.U[1]], [F.N[0], 0, F.N[1]], [0, 1, 0], w / 2, rngRange(fr, 6, 14), hgt / 2 + 1, c);
-      if (fr() < 0.06) { const q = W(g, s, x, ySq + hgt); cone(B.trim, q[0], ySq + hgt, q[2], rngRange(fr, 4, 9), rngRange(fr, 6, 20), 10, shade(hex(C.roof), 0.9)); }
+      Bf.trim.box(p[0], p[1], p[2], [F.U[0], 0, F.U[1]], [F.N[0], 0, F.N[1]], [0, 1, 0], w / 2, rngRange(fr, 6, 14), hgt / 2 + 1, c);
+      if (fr() < 0.06) { const q = W(g, s, x, ySq + hgt); cone(Bf.trim, q[0], ySq + hgt, q[2], rngRange(fr, 4, 9), rngRange(fr, 6, 20), 10, shade(hex(C.roof), 0.9)); }
     }
   }
   yield;
   streetProps(B, g, L, ctx);
   yield;
-  for (const key of ['facade', 'roof', 'trim', 'ground', 'iron', 'cloth', 'glow', 'water']) if (B[key]) { out[key] = B[key].build(); yield; }
-  if (B.bulbs.length) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(B.bulbs.flatMap((b) => b.slice(0, 3)), 3));
-    geo.setAttribute('aPh', new THREE.Float32BufferAttribute(B.bulbs.map((b) => b[3]), 1));
-    out.bulbs = geo;
-  }
-  if (B.wires.length) { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(B.wires, 3)); out.wires = geo; }
+  out.near = {}; out.far = {};
+  yield* finishBuilders(Bn, out.near);
+  yield* finishBuilders(Bf, out.far);
   out.layout = L; out.lights = ctx.lights;
 }
 // pavement slabs raised on a kerb
@@ -1967,6 +2104,7 @@ const PROPS = {
   cluj: { lamps: 'post', cafe: 'umbrella', strings: 1, laundry: 0, vespa: 0, planters: 0.4, postStyle: 'budapest' },
   istanbul: { lamps: 'wall', cafe: 'tea', strings: 0.45, laundry: 0.6, vespa: 0, planters: 0.45, kilims: 0.5, cats: 0.7, mosaic: 1 },
   ohrid: { lamps: 'post', cafe: 'umbrella', strings: 0.25, laundry: 0.3, vespa: 0, planters: 0.7, postStyle: 'ohrid', figs: 0.5 },
+  berlin: { lamps: 'post', cafe: 'tables', strings: 0, laundry: 0, vespa: 0, planters: 0.2, postStyle: 'berlin', lindens: 1, litfass: 1, bikes: 0.6 },
 };
 const BOX = (B, p, F, hu, hn, hy, col, gl) => (gl ? B.glow : B.trim).box(p[0], p[1], p[2], [F.U[0], 0, F.U[1]], [F.N[0], 0, F.N[1]], [0, 1, 0], hu, hn, hy, col);
 // an n-sided prism standing on the ground (tables, pots, poles)
@@ -2037,10 +2175,16 @@ function streetProps(B, g, L, ctx) {
       const x = side * (half - (S.walkway ? 0.45 : 0.6)), y = heightAt(g, s) + (S.walkway ? 0.14 : 0);
       const [px, , pz] = W(g, s, x, 0), F = { U: [g.fx, g.fz], N: [g.rx, g.rz] };
       const style = P.postStyle;
-      const hgt = style === 'paris' ? 4.2 : style === 'wien' ? 4.6 : 3.8;
+      const hgt = style === 'paris' ? 4.2 : style === 'wien' || style === 'berlin' ? 4.6 : 3.8;
       prism(B.trim, px, y, pz, 0.13, 0.5, 8, iron);
       prism(B.trim, px, y + 0.5, pz, 0.055, hgt - 0.5, 6, iron, false);
-      if (style === 'paris') { // a lantern on a short crook
+      if (style === 'berlin') { // a gas lantern: a glass box under a crowned hood
+        prism(B.trim, px, y + hgt - 0.05, pz, 0.12, 0.1, 6, iron);
+        BOX(B, [px, y + hgt + 0.3, pz], F, 0.2, 0.2, 0.25, hex('#ffe0a8'), true);
+        cone(B.trim, px, y + hgt + 0.55, pz, 0.3, 0.32, 6, iron);
+        prism(B.trim, px, y + hgt + 0.86, pz, 0.03, 0.16, 4, iron);
+        ctx.lights.push([px, y + hgt + 0.25, pz]);
+      } else if (style === 'paris') { // a lantern on a short crook
         BOX(B, [px, y + hgt + 0.25, pz], F, 0.16, 0.16, 0.24, hex('#ffd59a'), true);
         cone(B.trim, px, y + hgt + 0.48, pz, 0.24, 0.26, 6, iron);
         ctx.lights.push([px, y + hgt + 0.2, pz]);
@@ -2164,473 +2308,1294 @@ function streetProps(B, g, L, ctx) {
     prism(B.trim, p[0], h.yb, p[2], 0.09, 1.8, 5, hex('#6b5a48'), false);
     for (let i = 0; i < 5; i++) blob(B.trim, p[0] + rngRange(rng, -0.7, 0.7), h.yb + 2.0 + rng() * 0.8, p[2] + rngRange(rng, -0.7, 0.7), rngRange(rng, 0.45, 0.7), hex('#4a6b2e'), rng);
   }
+  // ---- Berlin: linden trees along the kerbs, round poster columns, bicycles against the walls ----
+  const road = half - (S.walkway || 0), kerbY = (s) => heightAt(g, s) + (S.walkway ? 0.14 : 0), columns = [];
+  if (P.litfass) for (let s = start + rngRange(rng, 18, 36), side = rng() < 0.5 ? -1 : 1; s < end - 10; s += rngRange(rng, 55, 85), side = -side) {
+    if (gapAt(side, s, 4)) continue;
+    columns.push([s, side]);
+    const [px, , pz] = W(g, s, side * (road + 0.95), 0);
+    litfassGeo(B, px, kerbY(s), pz, rng);
+  }
+  if (P.lindens) for (const side of [-1, 1]) for (let s = start + rngRange(rng, 3, 8); s < end; s += rngRange(rng, 9.5, 12)) {
+    if (gapAt(side, s, 3) || columns.some(([cs, sd]) => sd === side && Math.abs(cs - s) < 3.5)) continue;
+    const [px, , pz] = W(g, s, side * (road + 0.5), 0);
+    lindenGeo(B, px, kerbY(s), pz, rng);
+  }
+  if (P.bikes) for (const h of L.houses) {
+    if (rng() > P.bikes * 0.5 || h.w < 3) continue;
+    const F = rowFrame(g, h.side, h.s0, h.s1, half, h.yb), u = rngRange(rng, 1.0, h.w - 1.0), s = h.side < 0 ? h.s0 + u : h.s1 - u;
+    bikeGeo(B, F, u, kerbY(s), rng);
+    if (rng() < 0.35) bikeGeo(B, F, u + 0.75, kerbY(s), rng);
+  }
+}
+function lindenGeo(B, x, y, z, rng) {
+  B.trim.box(x, y + 0.012, z, [1, 0, 0], [0, 0, 1], [0, 1, 0], 0.62, 0.62, 0.012, hex('#2b2a28')); // the iron grate round the trunk
+  prism(B.trim, x, y, z, 0.17, 3.8, 6, hex('#4b4038'), false);
+  const k = rngRange(rng, 0.88, 1.15), cols = ['#4c6f31', '#5b8137', '#668d3d', '#46672e', '#57793a'];
+  for (let i = 0; i < 9; i++) {
+    const a = rng() * TAU, r = rngRange(rng, 0, 1.25) * k;
+    blob(B.trim, x + Math.cos(a) * r, y + (3.9 + rng() * 3.0) * k, z + Math.sin(a) * r, rngRange(rng, 1.1, 1.7) * k, hex(pick(rng, cols)), rng);
+  }
+}
+const POSTERS = ['#e94e3c', '#f2c94c', '#2d9cdb', '#f4f1e8', '#27ae60', '#8e5bd0', '#f2994a', '#1d1d1d', '#56ccf2', '#ef7fa8'];
+function litfassGeo(B, x, y, z, rng) {
+  const green = hex('#2e4a37'), n = 14, r = 0.6;
+  prism(B.trim, x, y, z, r + 0.07, 0.32, n, green);
+  for (const [y0, y1] of [[0.32, 1.62], [1.62, 2.9]]) {
+    for (let i = 0; i < n; i++) {
+      const a0 = (i / n) * TAU, a1 = ((i + 1) / n) * TAU;
+      const p0 = [x + Math.cos(a0) * r, z + Math.sin(a0) * r], p1 = [x + Math.cos(a1) * r, z + Math.sin(a1) * r];
+      B.trim.quad([p1[0], y + y0, p1[1]], [p0[0], y + y0, p0[1]], [p0[0], y + y1, p0[1]], [p1[0], y + y1, p1[1]], hex(pick(rng, POSTERS)));
+    }
+  }
+  prism(B.trim, x, y + 2.9, z, r + 0.08, 0.14, n, green);
+  cone(B.trim, x, y + 3.04, z, r + 0.08, 0.6, n, green);
+  prism(B.trim, x, y + 3.6, z, 0.06, 0.25, 6, green);
+}
+// a bicycle parked along a wall: two spoked rims and a diamond frame
+function bikeGeo(B, F, u, y, rng) {
+  const c = hex(pick(rng, ['#1f1f1f', '#2f5d46', '#a3302a', '#2c4d7a', '#e6dccb', '#7a7a7a', '#d9a33a'])), dark = hex('#202020');
+  const U = [F.U[0], 0, F.U[1]], N = [F.N[0], 0, F.N[1]], up = [0, 1, 0], d = -0.32, R = 0.34, wb = 0.52;
+  for (const cu of [-wb, wb]) {
+    for (let i = 0; i < 10; i++) {
+      const a = ((i + 0.5) / 10) * TAU, ca = Math.cos(a), sa = Math.sin(a);
+      const p = FP(F, u + cu + ca * R, d, y + R + sa * R);
+      B.trim.box(p[0], p[1], p[2], [-sa * U[0], ca, -sa * U[2]], N, [ca * U[0], sa, ca * U[2]], R * Math.sin(Math.PI / 10) + 0.012, 0.022, 0.026, hex('#151515'), false);
+    }
+  }
+  const bar = (u0, y0, u1, y1, col, t = 0.022) => {
+    const a = FP(F, u + u0, d, y + y0), b = FP(F, u + u1, d, y + y1);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), ax = [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len];
+    const az = [ax[1] * N[2] - ax[2] * N[1], ax[2] * N[0] - ax[0] * N[2], ax[0] * N[1] - ax[1] * N[0]];
+    B.trim.box((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, ax, N, az, len / 2, t, t, col, false);
+  };
+  bar(-wb, R, -0.05, R, c); bar(-0.05, R, -0.13, R + 0.52, c); bar(-wb, R, -0.13, R + 0.5, c);
+  bar(-0.13, R + 0.5, 0.42, R + 0.52, c); bar(-0.05, R, 0.42, R + 0.5, c); bar(0.42, R + 0.5, wb, R, c);
+  bar(0.42, R + 0.5, 0.37, R + 0.8, dark);
+  const hb = FP(F, u + 0.37, d, y + R + 0.82); B.trim.box(hb[0], hb[1], hb[2], N, U, up, 0.24, 0.02, 0.02, dark, false);
+  const sd = FP(F, u - 0.14, d, y + R + 0.57); B.trim.box(sd[0], sd[1], sd[2], U, N, up, 0.13, 0.06, 0.03, hex('#1a1a1a'));
 }
 
 
 /* =====================================================================
-   Landmarks: one builder per city, in local metres (x right, y up, +z toward the street)
+   Landmarks: paper cut-outs. Each one is painted in code as a few layers of coloured card, like a
+   pop-up book, and stood up at the end of its street a few metres apart, so the layers shift as you
+   walk. Coordinates are metres: x to the right, y up from the street; a layer stands z metres back.
    ===================================================================== */
-// surface modes for the landmark shader (aL.x)
-const LM = { PLAIN: 0, WIN: 1, ARCADE: 2, LATTICE: 3, RIBS: 4, ZIGZAG: 5, ASHLAR: 6, TILES: 7, ATTIC: 8 };
-class LB extends GB {
-  constructor() { super({ aM: 2, aL: 4 }); }
-  q(a, b, c, d, col, uv, L) { this.quad(a, b, c, d, col, { aM: uv, aL: L }); }
-  // vertical wall from (x0,z0) to (x1,z1), facing to the right of that direction
-  wallL(x0, z0, x1, z1, y0, y1, col, L, u0 = 0) {
-    const w = Math.hypot(x1 - x0, z1 - z0);
-    this.q([x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0], col, [[u0, y0], [u0 + w, y0], [u0 + w, y1], [u0, y1]], L);
-  }
-  boxL(cx, cy, cz, sx, sy, sz, col, L, skipBottom = true) {
-    const x0 = cx - sx / 2, x1 = cx + sx / 2, y0 = cy - sy / 2, y1 = cy + sy / 2, z0 = cz - sz / 2, z1 = cz + sz / 2;
-    this.wallL(x0, z1, x1, z1, y0, y1, col, L);
-    this.wallL(x1, z0, x0, z0, y0, y1, shade(col, 0.9), L);
-    this.wallL(x0, z0, x0, z1, y0, y1, shade(col, 0.95), L);
-    this.wallL(x1, z1, x1, z0, y0, y1, shade(col, 0.95), L);
-    this.q([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], shade(col, 1.04), [[x0, z1], [x1, z1], [x1, z0], [x0, z0]], L);
-    if (!skipBottom) this.q([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], col, [[0, 0], [1, 0], [1, 1], [0, 1]], L);
-  }
-  // tapered n-sided shaft (r0 at y0 → r1 at y1); rot turns it about y
-  prismL(cx, cz, r0, r1, y0, y1, n, col, L, rot = Math.PI / n, cap = false) {
-    let u = 0;
-    for (let i = 0; i < n; i++) {
-      const a0 = rot + (i / n) * TAU, a1 = rot + ((i + 1) / n) * TAU;
-      const p = (r, a, y) => [cx + Math.sin(a) * r, y, cz + Math.cos(a) * r];
-      const w = 2 * r0 * Math.sin(Math.PI / n);
-      this.q(p(r0, a0, y0), p(r0, a1, y0), p(r1, a1, y1), p(r1, a0, y1), shade(col, 0.88 + 0.12 * Math.cos(a0 + 0.6)), [[u, y0], [u + w, y0], [u + w * r1 / r0, y1], [u, y1]], L);
-      u += w;
-      if (cap) this.tri([cx, y1, cz], p(r1, a0, y1), p(r1, a1, y1), col, { aM: [[0, 0], [1, 0], [0, 1]], aL: L });
-    }
-  }
-  coneL(cx, cz, r, y0, y1, n, col, L, rot = Math.PI / n) {
-    for (let i = 0; i < n; i++) {
-      const a0 = rot + (i / n) * TAU, a1 = rot + ((i + 1) / n) * TAU;
-      const p = (a) => [cx + Math.sin(a) * r, y0, cz + Math.cos(a) * r];
-      const w = 2 * r * Math.sin(Math.PI / n), sl = Math.hypot(y1 - y0, r);
-      this.tri(p(a0), p(a1), [cx, y1, cz], shade(col, 0.86 + 0.14 * Math.cos(a0 + 0.6)), { aM: [[0, 0], [w, 0], [w / 2, sl]], aL: L });
-    }
-  }
-  // surface of revolution from a profile [[r, y], ...]; u runs in metres round the middle radius
-  latheL(cx, cz, prof, segs, col, L, a0 = 0, a1 = TAU) {
-    let vAcc = 0;
-    for (let k = 0; k < prof.length - 1; k++) {
-      const [r0, y0] = prof[k], [r1, y1] = prof[k + 1], seg = Math.hypot(r1 - r0, y1 - y0), rm = (r0 + r1) / 2;
-      for (let i = 0; i < segs; i++) {
-        const t0 = a0 + (a1 - a0) * i / segs, t1 = a0 + (a1 - a0) * (i + 1) / segs;
-        const p = (r, a, y) => [cx + Math.sin(a) * r, y, cz + Math.cos(a) * r];
-        this.q(p(r0, t0, y0), p(r0, t1, y0), p(r1, t1, y1), p(r1, t0, y1), shade(col, 0.9 + 0.1 * Math.cos(t0 + 0.6)),
-          [[t0 * rm, vAcc], [t1 * rm, vAcc], [t1 * rm, vAcc + seg], [t0 * rm, vAcc + seg]], L);
+// colours as [r, g, b] in 0–255 sRGB
+const crgb = (h) => (typeof h === 'string' ? (() => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; })() : h);
+const ccss = (c, a = 1) => (a >= 1 ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`);
+// k < 1 darkens, k > 1 moves toward white
+const ctone = (h, k) => { const c = crgb(h); return k <= 1 ? c.map((v) => v * k) : c.map((v) => v + (255 - v) * (k - 1)); };
+const cmix = (a, b, t) => { const p = crgb(a), q = crgb(b); return p.map((v, i) => v + (q[i] - v) * t); };
+
+// ---- shapes: rings of [x, y] points (several rings cut holes, even-odd) ----
+const R = {
+  rect: (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
+  poly: (pts) => pts,
+  // points along an ellipse from angle a0 to a1 (radians, counter-clockwise, y up)
+  arc: (cx, cy, rx, ry, a0, a1, n = 24) => { const o = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; o.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); } return o; },
+  ell: (cx, cy, rx, ry, n = 40) => R.arc(cx, cy, rx, ry, 0, TAU * (1 - 1 / n), n - 1),
+  // an opening with a round top: x, y = bottom left; h includes the arch
+  arch: (x, y, w, h, n = 16) => { const r = w / 2; return [[x, y], [x + w, y], ...R.arc(x + r, y + h - r, r, r, 0, Math.PI, n)]; },
+  // smooth a closed or open polyline (Catmull-Rom), n points per span
+  smooth: (pts, n = 6, closed = false) => {
+    const o = [], N = pts.length, P = (i) => pts[closed ? (i + N) % N : clamp(i, 0, N - 1)];
+    for (let i = 0; i < (closed ? N : N - 1); i++) {
+      const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+      for (let k = 0; k < n; k++) {
+        const t = k / n, t2 = t * t, t3 = t2 * t;
+        o.push([0, 1].map((j) => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3)));
       }
-      vAcc += seg;
     }
+    if (!closed) o.push(pts[N - 1]);
+    return o;
+  },
+  // a symmetric outline from its right half (x offsets from cx, bottom to top)
+  sym: (cx, y, half) => { const right = half.map(([dx, dy]) => [cx + dx, y + dy]); return [...right, ...right.slice().reverse().map(([x, yy]) => [2 * cx - x, yy])]; },
+  // a pointed (gothic) arch
+  pointed: (x, y, w, h, n = 10) => {
+    const r = w * 0.8, sh = h - Math.sqrt(r * r - (r - w / 2) ** 2), o = [[x, y], [x + w, y], [x + w, y + sh]];
+    const a0 = 0, a1 = Math.acos((r - w / 2) / r);
+    for (let i = 1; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; o.push([x + w - r + Math.cos(a) * r, y + sh + Math.sin(a) * r]); }
+    for (let i = n - 1; i >= 0; i--) { const a = a0 + (a1 - a0) * i / n; o.push([x + r - Math.cos(a) * r, y + sh + Math.sin(a) * r]); }
+    o.push([x, y + sh]); return o;
+  },
+  // a dome: half ellipse on a flat base at y
+  dome: (cx, y, rx, ry, n = 28) => R.arc(cx, y, rx, ry, 0, Math.PI, n),
+  // an onion cupola, w wide and h tall, standing on y
+  onion: (cx, y, w, h) => R.sym(cx, y, R.smooth([[0.36, 0], [0.5, 0.14], [0.52, 0.3], [0.42, 0.48], [0.24, 0.64], [0.1, 0.8], [0.03, 0.94], [0, 1]], 5).map(([a, b]) => [a * w, b * h])),
+  // a baroque bell roof: flares out at the foot, swells, then a waist and a lantern
+  bell: (cx, y, w, h) => R.sym(cx, y, R.smooth([[0.5, 0], [0.42, 0.12], [0.44, 0.3], [0.32, 0.5], [0.14, 0.62], [0.12, 0.72], [0.17, 0.8], [0.08, 0.9], [0.02, 0.97], [0, 1]], 4).map(([a, b]) => [a * w, b * h])),
+  tri: (x0, y0, x1, y1, x2, y2) => [[x0, y0], [x1, y1], [x2, y2]],
+  ragged: (x0, x1, yfn, step, amp, rng) => { const o = []; for (let x = x0; x < x1 + step * 0.5; x += step) { const xx = Math.min(x, x1); o.push([xx, yfn(xx) + (rng() - 0.5) * 2 * amp]); } return o; },
+  // a tapering spike (spires, minarets' caps, obelisks)
+  spike: (cx, y, w, h) => [[cx - w / 2, y], [cx + w / 2, y], [cx, y + h]],
+  // mirror a list of [x, y] across x = cx
+  mirror: (pts, cx = 0) => pts.map(([x, y]) => [2 * cx - x, y]),
+  move: (pts, dx, dy) => pts.map(([x, y]) => [x + dx, y + dy]),
+};
+
+// ---- the painter: designs record pieces, then they are painted a few at a time ----
+const CARD = { edge: 3.2, hi: 1.6, taps: [[1.5, 2.5, 0.12], [3.5, 5.5, 0.09], [6.5, 9.5, 0.065], [10.5, 15, 0.04]] }; // pixels
+function packRects(sizes, W) {
+  const free = [{ x: 0, y: 0, w: W, h: 1e9 }], pos = new Array(sizes.length); let H = 0;
+  const order = sizes.map((s, i) => i).sort((a, b) => sizes[b][1] - sizes[a][1] || sizes[b][0] - sizes[a][0]);
+  for (const i of order) {
+    const [w, h] = sizes[i]; let best = null;
+    for (const f of free) if (w <= f.w && h <= f.h && (!best || f.y < best.y || (f.y === best.y && f.x < best.x))) best = f;
+    if (!best) return null;
+    pos[i] = { x: best.x, y: best.y }; H = Math.max(H, best.y + h);
+    free.splice(free.indexOf(best), 1);
+    if (best.w > w) free.push({ x: best.x + w, y: best.y, w: best.w - w, h });
+    if (best.h > h) free.push({ x: best.x, y: best.y + h, w: best.w, h: best.h - h });
   }
-  // a wall along an ellipse arc (centre cx,cz; radii rx along x, rz along z), facing outward unless inward
-  ellWallL(cx, cz, rx, rz, y0, y1, a0, a1, segs, col, L, inward = false) {
-    let u = 0;
-    for (let i = 0; i < segs; i++) {
-      const t0 = a0 + (a1 - a0) * i / segs, t1 = a0 + (a1 - a0) * (i + 1) / segs;
-      const p0 = [cx + Math.sin(t0) * rx, cz + Math.cos(t0) * rz], p1 = [cx + Math.sin(t1) * rx, cz + Math.cos(t1) * rz];
-      const w = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
-      const yy1 = typeof y1 === 'function' ? y1(t0) : y1, yy1b = typeof y1 === 'function' ? y1(t1) : y1;
-      const A = [p0[0], y0, p0[1]], B = [p1[0], y0, p1[1]], Cc = [p1[0], yy1b, p1[1]], D = [p0[0], yy1, p0[1]];
-      if (inward) this.q(B, A, D, Cc, col, [[u + w, y0], [u, y0], [u, yy1], [u + w, yy1b]], L);
-      else this.q(A, B, Cc, D, col, [[u, y0], [u + w, y0], [u + w, yy1b], [u, yy1]], L);
-      u += w;
-    }
-  }
+  return { pos, W, H };
 }
-function makeLandmarkMat(cutout, flood) {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: cutout ? THREE.DoubleSide : THREE.FrontSide });
-  if (cutout && LM_A2C) { mat.alphaToCoverage = true; mat.defines = { LM_A2C: 1 }; }
-  return patch(mat, cutout ? 'lm-cut' : 'lm', (sh) => {
-    vertHead(sh, 'attribute vec2 aM; attribute vec4 aL; varying vec2 vM; flat varying vec4 vL; varying float vY;');
-    sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vM = aM; vL = aL; vY = position.y;');
-    fragHead(sh, `varying vec2 vM; flat varying vec4 vL; varying float vY; uniform float uEvening, uFlood, uTime, uLow, uHigh, uHold, uSparkle; uniform vec3 uFloodCol;
-      ${GLSL_NOISE} float lWin = 0.0, lCut = 1.0;`);
+class CardPainter {
+  constructor(spec, layers, ppm) { this.spec = spec; this.L = layers; this.ppm = ppm; this.ops = []; this.cur = null; this.rng = mulberry32(hashInt(7, spec.seed || 1)); }
+  on(id) { this.cur = this.L[id]; return this; }
+  // a piece of card: shadow on what lies below, the cut edge, the face, a light catch on the top edge
+  piece(rings, col, o = {}) {
+    if (typeof rings[0][0] === 'number') rings = [rings];
+    const L = this.cur, jit = o.jitter ?? 0.03, k = 1 + (this.rng() - 0.5) * 2 * jit;
+    const face = crgb(col).map((v) => clamp(v * k, 0, 255));
+    const mask = [Math.round((o.win || 0) * 255), Math.round((o.flood ?? L.flood ?? 1) * 255), Math.round((o.spark || 0) * 255)];
+    const pathOf = (g) => () => { g.beginPath(); for (const r of rings) { g.moveTo(r[0][0], r[0][1]); for (let i = 1; i < r.length; i++) g.lineTo(r[i][0], r[i][1]); g.closePath(); } };
+    const lift = o.shadow ?? 1, ed = o.edge ?? 1;
+    if (lift > 0 || ed > 0) this.ops.push((g, m, P) => {
+      const px = 1 / P.ppm, path = pathOf(g);
+      P.begin(g, L, 1);
+      // (the shadow only darkens card already there, never the air around it)
+      if (lift > 0) for (const [dx, dy, a] of CARD.taps) { g.save(); g.globalCompositeOperation = 'source-atop'; g.translate(dx * px * lift, -dy * px * lift); path(); g.fillStyle = `rgba(38,22,12,${a * Math.min(1.4, lift)})`; g.fill('evenodd'); g.restore(); }
+      if (ed > 0) { g.save(); g.translate(0, -CARD.edge * px * ed); path(); g.fillStyle = ccss(ctone(face, 0.55)); g.fill('evenodd'); g.restore(); }
+      P.end(g);
+    });
+    this.ops.push((g, m, P) => {
+      const px = 1 / P.ppm, path = pathOf(g);
+      P.begin(g, L, 1);
+      if (o.atop) g.globalCompositeOperation = 'source-atop';
+      path(); g.fillStyle = ccss(face); g.fill('evenodd');
+      if (o.grad) { // a soft fold of light across the piece: [x0, y0, x1, y1, amount]
+        const [x0, y0, x1, y1, a] = o.grad, gr = g.createLinearGradient(x0, y0, x1, y1);
+        gr.addColorStop(0, `rgba(255,248,236,${Math.max(0, a)})`); gr.addColorStop(0.5, 'rgba(255,248,236,0)'); gr.addColorStop(1, `rgba(30,18,8,${Math.max(0, a) * 1.1})`);
+        g.fillStyle = gr; g.fill('evenodd');
+      }
+      if ((o.hi ?? 1) > 0) { g.save(); path(); g.clip('evenodd'); g.translate(0, -CARD.hi * px * 1.2); path(); g.lineWidth = CARD.hi * px * 1.4; g.strokeStyle = ccss(ctone(face, 1.28), 0.85); g.stroke(); g.restore(); }
+      P.end(g);
+      const mp = pathOf(m);
+      P.begin(m, L, 0.5); if (o.atop) m.globalCompositeOperation = 'source-atop'; mp(); m.fillStyle = `rgb(${mask[0]},${mask[1]},${mask[2]})`; m.fill('evenodd'); P.end(m);
+    });
+    return this;
+  }
+  rect(x, y, w, h, col, o) { return this.piece(R.rect(x, y, w, h), col, o); }
+  poly(pts, col, o) { return this.piece(pts, col, o); }
+  ell(cx, cy, rx, ry, col, o) { return this.piece(R.ell(cx, cy, rx, ry), col, o); }
+  // flat paint with no card effects (shading strips, fine detail); mask is optional
+  flat(rings, col, o = {}) { return this.piece(rings, col, { shadow: 0, edge: 0, hi: 0, jitter: 0, ...o }); }
+  // a window: a cut opening in the card, a shadow band where the card above overhangs, and (at dusk) light
+  win(x, y, w, h, o = {}) {
+    const ring = o.top === 'arch' ? R.arch(x, y, w, h) : o.top === 'pointed' ? R.pointed(x, y, w, h) : R.rect(x, y, w, h);
+    const lit = o.lit ?? (this.rng() < (o.litP ?? 0.55) ? 0.6 + this.rng() * 0.4 : 0);
+    const col = o.col || '#2b2622', L = this.cur;
+    this.ops.push((g, m, P) => {
+      const px = 1 / P.ppm;
+      P.begin(g, L, 1);
+      const trace = (c, dy = 0) => { c.beginPath(); c.moveTo(ring[0][0], ring[0][1] + dy); for (let i = 1; i < ring.length; i++) c.lineTo(ring[i][0], ring[i][1] + dy); c.closePath(); };
+      const path = (dy = 0) => trace(g, dy);
+      path(); g.fillStyle = ccss(ctone(col, 0.7)); g.fill();
+      g.save(); path(); g.clip(); path(-Math.min(h * 0.22, 4.5 * px)); g.fillStyle = ccss(crgb(col)); g.fill(); g.restore();
+      if (o.frame) { path(); g.lineWidth = o.frame; g.strokeStyle = ccss(crgb(o.frameCol || '#f2e6cc')); g.stroke(); }
+      P.end(g);
+      P.begin(m, L, 0.5); trace(m); m.fillStyle = `rgb(${Math.round(lit * 255)},0,0)`; m.fill(); P.end(m);
+    });
+    return this;
+  }
+  // thin members: lattice, railings, ribs (stroked polylines, w in metres)
+  line(pts, w, col, o = {}) {
+    const L = this.cur, c = crgb(col), mask = [0, Math.round((o.flood ?? L.flood ?? 1) * 255), Math.round((o.spark || 0) * 255)];
+    this.ops.push((g, m, P) => {
+      const px = 1 / P.ppm, lw = Math.max(w, 1.1 * px);
+      P.begin(g, L, 1);
+      const trace = (c) => { c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); if (o.close) c.closePath(); };
+      const path = () => trace(g);
+      g.lineJoin = 'round'; g.lineCap = o.cap || 'butt';
+      if ((o.shadow ?? 1) > 0) { g.save(); g.globalCompositeOperation = 'source-atop'; g.translate(2 * px, -3 * px); path(); g.lineWidth = lw; g.strokeStyle = 'rgba(38,22,12,0.16)'; g.stroke(); g.restore(); }
+      path(); g.lineWidth = lw; g.strokeStyle = ccss(c); g.stroke();
+      P.end(g);
+      P.begin(m, L, 0.5); trace(m); m.lineWidth = lw; m.lineJoin = 'round'; m.strokeStyle = `rgb(${mask[0]},${mask[1]},${mask[2]})`; m.stroke(); P.end(m);
+    });
+    return this;
+  }
+  // a rounded clump of paper foliage
+  tree(cx, y, w, h, cols = ['#4c7a3a', '#5f8f45', '#3f6a32', '#6e9c4e'], o = {}) {
+    const r = this.rng, n = o.n || Math.max(4, Math.round(w * h / 18));
+    if (o.trunk !== false) this.rect(cx - Math.max(0.25, w * 0.05), y, Math.max(0.5, w * 0.1), h * 0.45, o.trunkCol || '#5a4434', { flood: 0, shadow: 0.6 });
+    const blobs = [];
+    const lo = o.trunk === false ? 0.24 : 0.44;
+    for (let i = 0; i < n; i++) {
+      const by = y + h * (lo + (0.84 - lo) * r()), taper = 1 - 0.45 * ((by - y) / h - lo) / (0.84 - lo);
+      const bx = cx + (r() - 0.5) * w * 0.72 * taper, rr = w * (0.2 + 0.14 * r());
+      blobs.push([bx, by, rr, rr * (0.8 + 0.25 * r())]);
+    }
+    blobs.sort((a, b) => a[1] - b[1]).reverse();
+    for (const [bx, by, rx, ry] of blobs) this.piece(R.ell(bx, by, rx, ry, 22), pick(r, cols), { flood: 0, shadow: o.shadow ?? 0.8, jitter: 0.06 });
+    return this;
+  }
+  // a stand of trees across [x0, x1], tops between h0 and h1
+  trees(x0, x1, y, h0, h1, cols, o = {}) {
+    const r = this.rng, items = [];
+    for (let x = x0; x < x1; x += rngRange(r, 3.5, 7)) items.push([x, rngRange(r, h0, h1)]);
+    for (const [x, h] of items) this.tree(x, y, h * rngRange(r, 0.5, 0.75), h, cols, { trunk: o.trunk ?? false, shadow: o.shadow ?? 0.7, n: o.n });
+    return this;
+  }
+  // a low bumpy band of bushes or hedge along [x0, x1]
+  hedge(x0, x1, y, h, cols, o = {}) {
+    const r = this.rng;
+    this.rect(x0, y, x1 - x0, h * 0.55, cols[0], { flood: 0, shadow: o.shadow ?? 0.4 });
+    for (let x = x0; x < x1; x += h * rngRange(r, 0.5, 0.9)) this.piece(R.ell(x, y + h * 0.55, h * rngRange(r, 0.45, 0.7), h * rngRange(r, 0.35, 0.5), 18), pick(r, cols), { flood: 0, shadow: o.shadow ?? 0.5, jitter: 0.06 });
+    return this;
+  }
+  raw(fn) { const L = this.cur; this.ops.push((g, m, P) => { P.begin(g, L, 1); fn(g, P); P.end(g); }); return this; }
+}
+// One set of big canvases and byte arrays, reused city after city: allocating ~40 MB afresh for every
+// landmark makes the browser stop for a full garbage collection now and then, which is a visible hitch.
+const CARD_POOL = { owner: null, cv: null, mc: null, S: 2048 };
+function cardPoolRelease(owner) { if (CARD_POOL.owner === owner) CARD_POOL.owner = null; }
+// Turn a landmark design into a painted atlas (colour + light mask), a few pieces per frame.
+function* paintCardGen(id, quality, out) {
+  const spec = LANDMARK_CARDS[id], maxW = quality === 'low' ? 1024 : 2048, PAD = 6;
+  const ids = Object.keys(spec.layers);
+  let ppm = Math.min(spec.ppm || 22, ...ids.map((k) => { const L = spec.layers[k]; return (maxW - 2 * PAD) / Math.max(L.x1 - L.x0, L.y1 - L.y0); }));
+  if (quality === 'low') ppm *= 0.6;
+  let pack = null;
+  for (let tries = 0; tries < 30; tries++) {
+    const sizes = ids.map((k) => { const L = spec.layers[k]; return [Math.ceil((L.x1 - L.x0) * ppm) + 2 * PAD, Math.ceil((L.y1 - L.y0) * ppm) + 2 * PAD]; });
+    pack = packRects(sizes, maxW);
+    if (pack && pack.H <= maxW) break;
+    ppm *= 0.93; pack = null;
+  }
+  const W = maxW, H = Math.max(64, Math.ceil(pack.H / 8) * 8);
+  const L = {};
+  ids.forEach((k, i) => { const s = spec.layers[k]; L[k] = { id: k, ...s, px: pack.pos[i].x + PAD, py: pack.pos[i].y + PAD, pw: (s.x1 - s.x0) * ppm, ph: (s.y1 - s.y0) * ppm }; });
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const cpu = { willReadFrequently: true };
+  let cv, mc;
+  if (!CARD_POOL.owner) {
+    CARD_POOL.owner = out; out.pooled = true;
+    const S = CARD_POOL.S;
+    cv = CARD_POOL.cv || (CARD_POOL.cv = mk(S, S)); mc = CARD_POOL.mc || (CARD_POOL.mc = mk(S >> 1, S >> 1));
+    cv.getContext('2d', cpu).clearRect(0, 0, S, S); yield;
+    mc.getContext('2d', cpu).clearRect(0, 0, S >> 1, S >> 1); yield;
+  } else { cv = mk(W, H); mc = mk(W >> 1, H >> 1); }
+  const g = cv.getContext('2d', cpu), m = mc.getContext('2d', cpu);
+  const P = new CardPainter(spec, L, ppm);
+  P.ppm = ppm;
+  // place a layer's metres on the canvas (y up), clipped to its own patch
+  P.begin = (c, Ly, s) => {
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.beginPath(); c.rect((Ly.px - PAD + 1) * s, (Ly.py - PAD + 1) * s, (Ly.pw + 2 * PAD - 2) * s, (Ly.ph + 2 * PAD - 2) * s); c.clip();
+    c.setTransform(ppm * s, 0, 0, -ppm * s, (Ly.px - Ly.x0 * ppm) * s, (Ly.py + Ly.y1 * ppm) * s);
+  };
+  P.end = (c) => c.restore();
+  spec.draw(P, P.rng);
+  yield;
+  let t0 = performance.now(); const slow = [];
+  for (let i = 0; i < P.ops.length; i++) {
+    const a = performance.now();
+    P.ops[i](g, m, P);
+    // the canvas only records drawing until something reads it: read a pixel so the work happens now, in this slice
+    g.getImageData(0, 0, 1, 1); m.getImageData(0, 0, 1, 1);
+    const d = performance.now() - a; if (d > 2.5) slow.push(`${i}:${d.toFixed(1)}`);
+    if (performance.now() - t0 > 1.6) { yield; t0 = performance.now(); }
+  }
+  Object.assign(out, { canvas: cv, mask: mc, layers: L, ppm, W, H, slow, nOps: P.ops.length });
+}
+
+// The card material: the painted colours (stored premultiplied, decoded here), lit like everything else,
+// plus lit windows and floodlight at dusk, and the Eiffel Tower's sparkle
+function makeCardMat(tex, mask, flood) {
+  const mat = new THREE.MeshLambertMaterial({ map: tex, transparent: true, alphaTest: 0.03, depthWrite: true, vertexColors: true });
+  return patch(mat, 'lm-card', (sh) => {
+    vertHead(sh, 'attribute vec2 aM; varying vec2 vM;');
+    sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vM = aM;');
+    fragHead(sh, `uniform sampler2D tMask; uniform float uEvening, uFlood, uTime, uLow, uHold, uSparkle; uniform vec3 uFloodCol; varying vec2 vM;
+      ${GLSL_NOISE} vec4 cMask = vec4(0.0);`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
-      {
-        vec2 m = vM; int mode = int(vL.x + 0.5); float p1 = vL.y, p2 = vL.z, p3 = vL.w;
-        float wpx = fwidth(m.x) + fwidth(m.y);
-        float k = 1.0;
-        if (mode == 1) { // window grid
-          vec2 c = vec2(m.x / p1, m.y / p2); vec2 f = fract(c) - vec2(0.5, 0.45);
-          float wv = abs(f.x) < 0.2 && abs(f.y) < 0.3 ? 1.0 : 0.0;
-          if (p3 > 0.5 && f.y > 0.1) wv *= step(length(vec2(f.x / 0.2, (f.y - 0.1) / 0.2)), 1.0 + (p3 > 1.5 ? 0.6 - (f.y - 0.1) * 2.0 : 0.0));
-          float aa = clamp(1.0 - wpx / min(p1, p2) * 3.0, 0.0, 1.0);
-          lWin = mix(0.25, wv, aa); k = 1.0 - 0.72 * lWin;
-        } else if (mode == 2) { // Colosseum arcade: arches between half-columns, a cornice band per storey
-          float fx = fract(m.x / p1) - 0.5, ly = fract(m.y / p2), lv = floor(m.y / p2);
-          float aw = 0.3, ah = 0.62;
-          float yy = ly - 0.08; float inside = (abs(fx) < aw && yy > 0.0 && (yy < ah - aw * 0.6 || length(vec2(fx / aw, (yy - (ah - aw * 0.6)) / (aw * p1 / p2))) < 1.0)) ? 1.0 : 0.0;
-          if (p3 > 0.5) inside = (abs(fx) < 0.12 && abs(ly - 0.5) < 0.12) ? 1.0 : 0.0;
-          float col = smoothstep(0.06, 0.0, abs(abs(fx) - 0.5) - 0.06);
-          float band = smoothstep(0.06, 0.0, abs(ly - 0.97) - 0.02) + smoothstep(0.05, 0.0, abs(ly - 0.05) - 0.01);
-          float aa = clamp(1.0 - wpx / p1 * 4.0, 0.0, 1.0);
-          lCut = 1.0 - inside * aa * (p3 > 0.5 ? 0.0 : 1.0); k = (1.0 + 0.12 * col + 0.1 * band) * (1.0 - 0.75 * inside * (p3 > 0.5 ? 1.0 : 0.0) * aa);
-        } else if (mode == 3) { // iron lattice: frame + crossed diagonals in each panel
-          vec2 c = m / p1; vec2 f = fract(c);
-          float bw = p2 + wpx / p1 * 0.6;
-          float frame = max(step(f.x, bw), step(f.y, bw));
-          float d1 = abs(f.x - f.y), d2 = abs(f.x + f.y - 1.0);
-          float diag = step(min(d1, d2), bw * 0.9);
-          float cov = max(frame, diag);
-          float dens = clamp(wpx / p1 * 2.5, 0.0, 1.0);
-          lCut = mix(cov, 0.62, dens); k = 1.0;
-        } else if (mode == 4) { // ribbed dome
-          float r = fract(m.x / p1); float rib = smoothstep(0.07, 0.0, abs(r - 0.5) - 0.03);
-          float t = fract(m.y / 0.5 + 0.5 * floor(m.x / 0.7)); k = 0.9 + 0.1 * step(0.1, t);
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.84, 0.8), rib * p2);
-        } else if (mode == 5) { // the cathedral's zig-zag glazed tiles
-          float zz = abs(fract(m.x / 6.0) - 0.5) * 6.0; float band = floor((m.y - zz) / 2.2);
-          float id = mod(band, 4.0);
-          vec3 tc = id < 1.0 ? vec3(0.72, 0.56, 0.16) : id < 2.0 ? vec3(0.12, 0.3, 0.18) : id < 3.0 ? vec3(0.08, 0.08, 0.07) : vec3(0.75, 0.72, 0.62);
-          float row = fract(m.y / 0.3); tc *= 0.85 + 0.15 * step(0.15, row);
-          diffuseColor.rgb = tc;
-        } else if (mode == 6) { // stone courses
-          float cy = fract(m.y / p1), cx = fract(m.x / (p1 * 2.2) + 0.5 * mod(floor(m.y / p1), 2.0));
-          float j = max(smoothstep(0.08, 0.0, cy), smoothstep(0.04, 0.0, min(cx, 1.0 - cx)) * 0.7);
-          float aa = clamp(1.0 - wpx / p1 * 3.0, 0.0, 1.0); k = 1.0 - 0.16 * j * aa;
-        } else if (mode == 7) { // clay tiles
-          float row = fract(m.y / 0.4); float bx = sin(fract(m.x / 0.25) * 3.14159);
-          float aa = clamp(1.0 - wpx * 4.0, 0.0, 1.0); k = mix(0.88, (0.65 + 0.35 * bx) * (0.75 + 0.25 * step(0.2, row)), aa);
-        } else if (mode == 8) { // attic: small square windows
-          vec2 c = vec2(m.x / p1, m.y / p2); vec2 f = fract(c) - 0.5;
-          float wv = (abs(f.x) < 0.15 && abs(f.y) < 0.2) ? 1.0 : 0.0; float aa = clamp(1.0 - wpx / p1 * 3.0, 0.0, 1.0);
-          lWin = wv * aa; k = 1.0 - 0.7 * lWin;
-        }
-        float n = fbm(m * 0.08) - 0.5, n2 = vnoise(m * vec2(0.6, 0.05));
-        diffuseColor.rgb *= k * (1.0 + 0.22 * n) * (0.94 + 0.08 * n2);
-        diffuseColor.a = lCut;
-        #ifdef LM_A2C
-          if (mode != 3 && lCut < 0.5) discard;
-        #else
-          if (lCut < 0.5) discard;
-        #endif
-      }`)
+      .replace('#include <map_fragment>', /* glsl */`
+        vec4 tcol = texture2D(map, vMapUv);
+        vec3 cc = pow(tcol.rgb / max(tcol.a, 0.004), vec3(2.2));
+        // paper grain: fine speckle and a slow cloudiness, fading out before it could shimmer
+        vec2 gp = vM * 24.0; float gfade = clamp(1.6 - length(fwidth(gp)) * 1.4, 0.0, 1.0);
+        float grain = (hash12(floor(gp)) - 0.5) * 0.08 * gfade + (vnoise(vM * 1.7) - 0.5) * 0.07;
+        diffuseColor.rgb *= cc * (1.0 + grain); diffuseColor.a *= tcol.a;
+        cMask = texture2D(tMask, vMapUv);`)
+      .replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace('clamp( fogFactor, 0.0, 1.0 )', 'clamp( fogFactor * 0.62, 0.0, 1.0 )'))
       .replace('#include <emissivemap_fragment>', /* glsl */`#include <emissivemap_fragment>
       {
         float fl = uFlood * uEvening * (1.0 - 0.55 * uHold) * (0.85 + 0.3 * uLow);
-        float hf = 0.55 + 0.45 * exp(-max(vY, 0.0) / 60.0);
-        totalEmissiveRadiance += diffuseColor.rgb * uFloodCol * fl * hf * 1.6;
-        totalEmissiveRadiance += lWin * uEvening * vec3(1.0, 0.62, 0.3) * 0.45;
-        if (int(vL.x + 0.5) == 3) {
-          vec2 sc = floor(vM / 1.7); float sp = hash12(sc + floor(uTime * 9.0));
-          totalEmissiveRadiance += vec3(1.0, 0.97, 0.9) * step(0.985, sp) * uSparkle * 9.0;
-        }
+        float hf = 0.55 + 0.45 * exp(-max(vM.y, 0.0) / 60.0);
+        // (pale stone takes floodlight more gently than dark iron, so it stays golden instead of burning white)
+        totalEmissiveRadiance += uFloodCol * fl * cMask.g * hf * (0.12 + 0.55 * diffuseColor.rgb);
+        totalEmissiveRadiance += cMask.r * uEvening * vec3(1.0, 0.6, 0.28) * 1.25 * diffuseColor.a;
+        vec2 sc = floor(vM / 1.3); float sp = hash12(sc + floor(uTime * 9.0));
+        totalEmissiveRadiance += vec3(1.0, 0.97, 0.9) * step(0.975, sp) * uSparkle * 9.0 * cMask.b;
       }`);
-  }, { uFlood: { value: flood ? 1 : 0 }, uFloodCol: { value: new THREE.Color(1.0, 0.72, 0.4) }, uSparkle: U.uSparkle });
+  }, { tMask: { value: mask }, uFlood: { value: flood }, uFloodCol: { value: new THREE.Color(1.0, 0.72, 0.42) }, uSparkle: U.uSparkle });
 }
 U.uSparkle = { value: 0 };
-
-const lmL = (mode, p1 = 1, p2 = 1, p3 = 0) => [mode, p1, p2, p3];
-let LM_A2C = true; // smooth lattice edges with multisampling; set false on Low quality
-
-/* ---------- Rome: the Colosseum ---------- */
-function lmColosseum(B, Bc) {
-  const trav = hex('#d6bf98'), dark = hex('#6b5a46'), cx = 0, cz = -80, rx = 94, rz = 78;
-  // the outer ring stands on the side you approach; further round it breaks down to the inner ring
-  const A0 = -1.95, A1 = 1.95; // radians either side of facing you
-  const tiers = [[0, 10.6], [10.6, 22.4], [22.4, 34.0]];
-  tiers.forEach(([y0, y1], i) => Bc.ellWallL(cx, cz, rx, rz, y0, y1, A0, A1, 120, shade(trav, 1 - i * 0.03), lmL(LM.ARCADE, 6.7, y1 - y0, 0)));
-  // attic storey with small windows, stepped down at the broken ends
-  const atticTop = (a) => { const e = Math.abs(a); return e > 1.7 ? 34 + 14 * clamp((1.95 - e) / 0.25, 0, 1) : 48; };
-  B.ellWallL(cx, cz, rx, rz, 34, atticTop, A0, A1, 120, shade(trav, 0.94), lmL(LM.ATTIC, 6.7, 7, 0));
-  // the inner rings and the cavea seen through the arches
-  B.ellWallL(cx, cz, rx - 6, rz - 6, 0, 30, -Math.PI, Math.PI, 120, shade(dark, 1.1), lmL(LM.ARCADE, 6.2, 10, 0));
-  B.ellWallL(cx, cz, rx - 12, rz - 12, 0, 36, -Math.PI, Math.PI, 96, dark, lmL(LM.PLAIN));
-  // ragged ends of the broken outer wall
-  for (const a of [A0, A1]) {
-    const x = cx + Math.sin(a) * rx, z = cz + Math.cos(a) * rz, xi = cx + Math.sin(a) * (rx - 6), zi = cz + Math.cos(a) * (rz - 6);
-    for (let y = 0; y < 34; y += 3.4) {
-      const hh = 3.4 + (vhash(Math.round(y), a > 0 ? 1 : 2, 3) % 3) * 1.2;
-      B.wallL(xi, zi, x, z, y, Math.min(34, y + hh), shade(trav, 0.85), lmL(LM.ASHLAR, 0.8));
-    }
+// Hand a painted canvas to the GPU without a hitch: copy it a strip at a time into a small reusable canvas and
+// upload that strip into a texture allocated here, one strip per frame (several in one frame fill the browser's
+// upload buffer and it stalls), then build the mipmaps. The canvas keeps its colours premultiplied, so the
+// mipmaps never darken the cut edges.
+let CARD_SYNC = 0;
+const STRIP = 128;
+let STRIP_CV = null;
+function* cardUploadGL(renderer, cv, w, h) {
+  const gl = renderer.getContext();
+  if (!STRIP_CV) { STRIP_CV = document.createElement('canvas'); STRIP_CV.width = CARD_POOL.S; STRIP_CV.height = STRIP; }
+  const sg = STRIP_CV.getContext('2d', { willReadFrequently: true });
+  const glt = gl.createTexture(), levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+  gl.bindTexture(gl.TEXTURE_2D, glt);
+  gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, w, h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+  renderer.resetState(); yield;
+  for (let y = 0; y < h; y += STRIP) {
+    const hh = Math.min(STRIP, h - y);
+    sg.clearRect(0, 0, w, STRIP); sg.drawImage(cv, 0, y, w, hh, 0, 0, w, hh);
+    gl.bindTexture(gl.TEXTURE_2D, glt);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, w, hh, gl.RGBA, gl.UNSIGNED_BYTE, STRIP_CV);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    renderer.resetState(); yield 'frame';
   }
-  // cornices round the tiers
-  for (const y of [10.6, 22.4, 34.0, 48]) B.ellWallL(cx, cz, rx + 0.6, rz + 0.6, y - 0.9, y, A0 + 0.02, A1 - 0.02, 120, shade(trav, 1.08), lmL(LM.PLAIN));
-  return { height: 48 };
+  gl.bindTexture(gl.TEXTURE_2D, glt); gl.generateMipmap(gl.TEXTURE_2D); renderer.resetState(); yield 'frame';
+  // a three.js texture that simply binds ours (never 'needsUpdate', so three never uploads anything itself)
+  const tex = new THREE.Texture(); tex.colorSpace = THREE.NoColorSpace;
+  const pr = renderer.properties.get(tex); pr.__webglTexture = glt; pr.__webglInit = true;
+  tex.userData.glt = glt;
+  return tex;
 }
-/* ---------- Paris: the Eiffel Tower ---------- */
-function lmEiffel(B, Bc) {
-  const col = hex('#6f5c45'), L = lmL(LM.LATTICE, 2.6, 0.07);
-  // the four legs: square lattice shafts leaning in from the corners to the second floor
-  const leg = (y) => { const t = y / 116; return { c: lerp(49, 12.5, Math.pow(t, 0.85)), h: lerp(13, 4.6, t) }; };
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    const N = 6;
-    for (let i = 0; i < N; i++) {
-      const y0 = (116 * i) / N, y1 = (116 * (i + 1)) / N, a = leg(y0), b = leg(y1);
-      const P = (l, dx, dz, y) => [sx * (l.c + dx * l.h), y, sz * (l.c + dz * l.h)];
-      const faces = [[[-1, 1], [1, 1]], [[1, 1], [1, -1]], [[1, -1], [-1, -1]], [[-1, -1], [-1, 1]]];
-      for (const [[ax, az], [bx, bz]] of faces) {
-        const w0 = 2 * a.h;
-        Bc.q(P(a, ax, az, y0), P(a, bx, bz, y0), P(b, bx, bz, y1), P(b, ax, az, y1), col, [[0, y0], [w0, y0], [w0, y1], [0, y1]], L);
-      }
-    }
-  }
-  // the great arches between the legs, and the first and second platforms
-  for (let f = 0; f < 4; f++) {
-    const ang = f * Math.PI / 2, c = Math.cos(ang), s = Math.sin(ang);
-    const M = 24;
-    for (let i = 0; i < M; i++) {
-      const t0 = i / M, t1 = (i + 1) / M, x0 = lerp(-37, 37, t0), x1 = lerp(-37, 37, t1);
-      const arch = (x) => 57 - 18 * Math.sqrt(Math.max(0, 1 - Math.pow(x / 37, 2)));
-      const z = 40;
-      const p = (x, yy) => [c * x + s * z, yy, -s * x + c * z];
-      Bc.q(p(x0, arch(x0) - 3), p(x1, arch(x1) - 3), p(x1, arch(x1) + 1), p(x0, arch(x0) + 1), col, [[x0, 0], [x1, 0], [x1, 4], [x0, 4]], lmL(LM.LATTICE, 1.6, 0.1));
-    }
-  }
-  B.boxL(0, 59.5, 0, 72, 6, 72, shade(col, 0.95), lmL(LM.WIN, 2.2, 3, 0));
-  B.boxL(0, 116.5, 0, 40, 4, 40, shade(col, 0.95), lmL(LM.WIN, 2.0, 2.4, 0));
-  // the shaft above, the top platform and the mast
-  const sh = (y) => (y < 276 ? lerp(17.5, 5.2, Math.pow((y - 118) / 158, 0.8)) : lerp(5.2, 2.6, (y - 276) / 24));
-  for (let y = 118; y < 300; y += 14) {
-    const y1 = Math.min(300, y + 14), a = sh(y), b = sh(y1);
-    for (let f = 0; f < 4; f++) {
-      const ang = f * Math.PI / 2, c = Math.cos(ang), s = Math.sin(ang);
-      const p = (r, yy, sgn) => [c * sgn * r + s * r, yy, -s * sgn * r + c * r];
-      Bc.q(p(a, y, -1), p(a, y, 1), p(b, y1, 1), p(b, y1, -1), col, [[0, y], [2 * a, y], [2 * a, y1], [0, y1]], lmL(LM.LATTICE, 2.0, 0.08));
-    }
-  }
-  B.boxL(0, 278, 0, 13, 5, 13, shade(col, 0.9), lmL(LM.WIN, 1.6, 2.4, 0));
-  B.prismL(0, 0, 2.4, 1.6, 300, 312, 8, col, lmL(LM.PLAIN));
-  B.prismL(0, 0, 0.7, 0.35, 312, 330, 6, shade(col, 0.8), lmL(LM.PLAIN));
-  return { height: 330 };
+function* cardUpload(renderer, card) {
+  const t0 = yield* cardUploadGL(renderer, card.canvas, card.W, card.H);
+  const t1 = yield* cardUploadGL(renderer, card.mask, card.W >> 1, card.H >> 1);
+  card.tex = [t0, t1]; card.direct = true;
+  card.canvas = card.mask = null;
 }
-/* ---------- Vienna: St. Stephen's Cathedral ---------- */
-function lmStephansdom(B) {
-  const stone = hex('#ab9d88'), dark = hex('#7f7464');
-  // nave and its famous roof
-  B.boxL(0, 15, -55, 36, 30, 100, stone, lmL(LM.WIN, 7.5, 30, 2));
-  const rz0 = -5, rz1 = -105, ry = 30, rr = 60;
-  const zz = lmL(LM.ZIGZAG);
-  B.q([-19, ry, rz0], [0, rr, rz0], [0, rr, rz1], [-19, ry, rz1], hex('#ffffff'), [[0, 0], [30, 0], [30, 100], [0, 100]].map(([u, v]) => [v, u]), zz);
-  B.q([0, rr, rz0], [19, ry, rz0], [19, ry, rz1], [0, rr, rz1], hex('#ffffff'), [[0, 30], [0, 0], [100, 0], [100, 30]], zz);
-  B.tri([-19, ry, rz0], [19, ry, rz0], [0, rr, rz0], stone, { aM: [[0, 0], [38, 0], [19, 30]], aL: lmL(LM.ASHLAR, 0.9) });
-  // west front: the giant door and the two Heathen towers
-  B.boxL(0, 17, -4.5, 38, 34, 3, stone, lmL(LM.ASHLAR, 0.9));
-  B.boxL(0, 7, -2.5, 9, 14, 1.2, hex('#3a332b'), lmL(LM.PLAIN));
-  for (const x of [-12, 12]) {
-    B.prismL(x, -4, 4.2, 3.8, 0, 52, 8, stone, lmL(LM.WIN, 2.6, 6, 2));
-    B.coneL(x, -4, 4.0, 52, 66, 8, dark, lmL(LM.TILES));
+function cardDispose(renderer, card) {
+  if (!card.tex) return;
+  for (const t of card.tex) {
+    if (t.userData.glt) { renderer.getContext().deleteTexture(t.userData.glt); renderer.properties.remove(t); } else t.dispose();
   }
-  // the south tower: square shaft, buttressed stages, then the long octagonal spire with pinnacles
-  const tx = 24, tz = -42;
-  B.boxL(tx, 22, tz, 15, 44, 15, stone, lmL(LM.WIN, 3.75, 11, 2));
-  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    B.boxL(tx + dx * 7.8, 26, tz + dz * 7.8, 2.6, 52, 2.6, shade(stone, 0.95), lmL(LM.ASHLAR, 0.9));
-    B.coneL(tx + dx * 7.8, tz + dz * 7.8, 1.6, 52, 60, 4, stone, lmL(LM.PLAIN));
-  }
-  B.prismL(tx, tz, 6.4, 5.2, 44, 72, 8, stone, lmL(LM.WIN, 2.6, 9, 2));
-  for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; B.coneL(tx + Math.sin(a) * 6.2, tz + Math.cos(a) * 6.2, 0.9, 70, 79, 4, stone, lmL(LM.PLAIN)); }
-  B.prismL(tx, tz, 5.0, 3.6, 72, 96, 8, stone, lmL(LM.WIN, 2.0, 8, 2));
-  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; B.coneL(tx + Math.sin(a) * 4.0, tz + Math.cos(a) * 4.0, 0.6, 94, 101, 4, stone, lmL(LM.PLAIN)); }
-  B.coneL(tx, tz, 3.6, 96, 136, 8, stone, lmL(LM.ASHLAR, 1.2));
-  // the unfinished north tower with its copper cap
-  B.boxL(-22, 25, -40, 14, 50, 14, stone, lmL(LM.WIN, 3.5, 12, 2));
-  B.latheL(-22, -40, [[7.2, 50], [7.4, 53], [5.5, 58], [2.5, 62], [1.2, 64], [1.4, 67], [0.4, 72]], 16, hex('#6f9a86'), lmL(LM.PLAIN));
-  return { height: 136 };
+  card.tex = null;
 }
-/* ---------- Budapest: the Parliament ---------- */
-function lmParliament(B) {
-  const stone = hex('#e9dcc4'), roof = hex('#8c4636'), dome = hex('#9a4a3c');
-  // long neo-Gothic wings with steep roofs and rows of pinnacles
-  for (const sx of [-1, 1]) {
-    B.boxL(sx * 68, 15, -20, 104, 30, 36, stone, lmL(LM.WIN, 4.2, 7.5, 2));
-    const ra = [sx * 16, 30, -2], rb = [sx * 120, 30, -2], rc = [sx * 120, 44, -20], rd = [sx * 16, 44, -20];
-    if (sx > 0) B.q(ra, rb, rc, rd, roof, [[0, 0], [104, 0], [104, 22], [0, 22]], lmL(LM.TILES));
-    else B.q(rb, ra, rd, rc, roof, [[104, 0], [0, 0], [0, 22], [104, 22]], lmL(LM.TILES));
-    for (let x = 20; x < 120; x += 6) {
-      B.prismL(sx * x, -2, 0.6, 0.45, 26, 33, 4, stone, lmL(LM.PLAIN));
-      B.coneL(sx * x, -2, 0.55, 33, 38, 4, stone, lmL(LM.PLAIN));
-    }
-    // corner pavilions with their own spires
-    for (const x of [42, 96]) {
-      B.boxL(sx * x, 20, -4, 12, 40, 12, stone, lmL(LM.WIN, 3, 7.5, 2));
-      B.coneL(sx * x, -4, 7, 40, 52, 4, roof, lmL(LM.TILES), Math.PI / 4);
-      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { B.prismL(sx * x + dx * 6, -4 + dz * 6, 0.8, 0.6, 30, 44, 6, stone, lmL(LM.PLAIN)); B.coneL(sx * x + dx * 6, -4 + dz * 6, 0.8, 44, 52, 6, stone, lmL(LM.PLAIN)); }
-    }
-  }
-  // the central block with the entrance towers
-  B.boxL(0, 18, -14, 34, 36, 30, stone, lmL(LM.WIN, 3.4, 8, 2));
-  B.q([-17, 36, 1], [17, 36, 1], [0, 52, -14], [0, 52, -14], roof, [[0, 0], [34, 0], [17, 18], [17, 18]], lmL(LM.TILES));
-  for (const x of [-13, 13]) {
-    B.prismL(x, 2, 3.4, 3.0, 0, 52, 8, stone, lmL(LM.WIN, 2.4, 7, 2));
-    B.coneL(x, 2, 3.4, 52, 70, 8, roof, lmL(LM.TILES));
-    B.prismL(x, 2, 0.3, 0.15, 70, 76, 4, stone, lmL(LM.PLAIN));
-  }
-  // the dome: a sixteen-sided drum with tall windows, the ribbed red dome, lantern and spire
-  const dz = -34;
-  B.prismL(0, dz, 15, 14.5, 30, 52, 16, stone, lmL(LM.WIN, 2.9, 22, 2));
-  for (let i = 0; i < 16; i++) { const a = (i + 0.5) * TAU / 16; B.prismL(Math.sin(a) * 15.2, dz + Math.cos(a) * 15.2, 0.7, 0.5, 44, 56, 4, stone, lmL(LM.PLAIN)); B.coneL(Math.sin(a) * 15.2, dz + Math.cos(a) * 15.2, 0.6, 56, 62, 4, stone, lmL(LM.PLAIN)); }
-  B.latheL(0, dz, [[14.5, 52], [14.0, 58], [12.0, 66], [8.6, 74], [4.2, 81], [1.8, 84]], 32, dome, lmL(LM.RIBS, 3.0, 1.0));
-  B.prismL(0, dz, 2.0, 1.6, 84, 90, 8, stone, lmL(LM.WIN, 1.2, 3, 2));
-  B.coneL(0, dz, 1.8, 90, 96, 8, dome, lmL(LM.PLAIN));
-  B.prismL(0, dz, 0.25, 0.1, 96, 101, 4, stone, lmL(LM.PLAIN));
-  return { height: 96 };
+// a stand-in pair for compiling the shader at load
+function cardTexturesDummy() {
+  return [new THREE.DataTexture(new Uint8Array(64), 4, 4), new THREE.DataTexture(new Uint8Array(64), 4, 4)].map((t) => { t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t; });
 }
-/* ---------- Warsaw: the Royal Castle and Sigismund's Column ---------- */
-function lmCastle(B) {
-  const brick = hex('#c8664f'), white = hex('#efe6d6'), roof = hex('#6d4a3a'), copper = hex('#5f8f7a'), bronze = hex('#4a4a3e'), granite = hex('#9a9690');
-  const cz = -40;
-  B.boxL(0, 12, cz, 110, 24, 18, brick, lmL(LM.WIN, 4.4, 6.2, 0));
-  B.q([-55, 24, cz + 9], [55, 24, cz + 9], [55, 33, cz], [-55, 33, cz], roof, [[0, 0], [110, 0], [110, 13], [0, 13]], lmL(LM.TILES));
-  // the clock tower, a little left of centre, with its tall copper helmet
-  const tx = -8;
-  B.boxL(tx, 22, cz + 4, 12, 44, 12, brick, lmL(LM.WIN, 3, 7, 0));
-  B.boxL(tx, 44.5, cz + 4, 12.6, 1.6, 12.6, white, lmL(LM.PLAIN));
-  B.prismL(tx, cz + 4, 1.5, 1.5, 36, 38.5, 16, white, lmL(LM.PLAIN), 0);
-  B.latheL(tx, cz + 4, [[6.6, 45], [6.2, 47], [3.4, 52], [4.2, 55], [2.6, 59], [1.2, 61], [1.6, 63], [0.4, 66], [0.12, 71]], 12, copper, lmL(LM.PLAIN));
-  // the side towers
-  for (const x of [-52, 52]) {
-    B.boxL(x, 18, cz + 2, 10, 36, 10, brick, lmL(LM.WIN, 2.5, 6, 0));
-    B.latheL(x, cz + 2, [[5.6, 36], [4.2, 40], [2.4, 43], [0.2, 50]], 8, copper, lmL(LM.PLAIN));
+// one mesh: a quad per layer, back to front so the see-through edges blend in the right order
+function buildLandmark(g, card) {
+  const id = g.C.landmark, spec = LANDMARK_CARDS[id];
+  if (!spec || !card || !card.mat) return null;
+  const pos = [], uv = [], am = [], nrm = [], col = [], idx = [];
+  const layers = Object.values(card.layers).sort((a, b) => b.z - a.z);
+  for (const L of layers) {
+    const u0 = L.px / card.W, u1 = (L.px + L.pw) / card.W, v1 = L.py / card.H, v0 = (L.py + L.ph) / card.H, z = -L.z, b = pos.length / 3;
+    pos.push(L.x0, L.y0, z, L.x1, L.y0, z, L.x1, L.y1, z, L.x0, L.y1, z);
+    uv.push(u0, v0, u1, v0, u1, v1, u0, v1);
+    am.push(L.x0, L.y0, L.x1, L.y0, L.x1, L.y1, L.x0, L.y1);
+    nrm.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+    col.push(0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 1.03, 1.03, 1.03, 1.03, 1.03, 1.03); // a little more light at the top of each card
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   }
-  // Sigismund's Column in front: stepped base, pedestal, shaft, capital, the king with his cross and sword
-  const zc = 18;
-  B.boxL(0, 0.6, zc, 10, 1.2, 10, granite, lmL(LM.ASHLAR, 0.6));
-  B.boxL(0, 2.7, zc, 4.4, 3, 4.4, granite, lmL(LM.ASHLAR, 0.75));
-  B.boxL(0, 4.6, zc, 5, 0.8, 5, shade(granite, 1.1), lmL(LM.PLAIN));
-  B.prismL(0, zc, 1.15, 0.95, 5, 19, 16, hex('#b9a88e'), lmL(LM.PLAIN));
-  B.boxL(0, 19.6, zc, 2.8, 1.2, 2.8, bronze, lmL(LM.PLAIN));
-  B.prismL(0, zc, 0.55, 0.42, 20.2, 22.4, 8, bronze, lmL(LM.PLAIN));
-  B.prismL(0, zc, 0.32, 0.2, 22.4, 23.0, 8, bronze, lmL(LM.PLAIN));
-  B.boxL(0, 23.2, zc, 0.36, 0.42, 0.36, bronze, lmL(LM.PLAIN));
-  B.boxL(0.75, 22.9, zc, 0.12, 2.4, 0.12, bronze, lmL(LM.PLAIN));
-  B.boxL(0.75, 23.6, zc, 0.8, 0.12, 0.12, bronze, lmL(LM.PLAIN));
-  B.boxL(-0.6, 21.9, zc + 0.2, 0.1, 1.4, 0.1, bronze, lmL(LM.PLAIN));
-  return { height: 71 };
-}
-/* ---------- Cluj-Napoca: St. Michael's Church and the Matthias Corvinus statue ---------- */
-function lmStMichael(B) {
-  const stone = hex('#b7a589'), roof = hex('#5c4436'), bronze = hex('#3f4a42');
-  B.boxL(0, 12, -50, 26, 24, 66, stone, lmL(LM.WIN, 6.5, 24, 2));
-  B.q([-13.5, 24, -17], [0, 40, -17], [0, 40, -83], [-13.5, 24, -83], roof, [[0, 0], [21, 0], [21, 66], [0, 66]].map(([u, v]) => [v, u]), lmL(LM.TILES));
-  B.q([0, 40, -17], [13.5, 24, -17], [13.5, 24, -83], [0, 40, -83], roof, [[0, 21], [0, 0], [66, 0], [66, 21]], lmL(LM.TILES));
-  B.tri([-13, 24, -17], [13, 24, -17], [0, 40, -17], stone, { aM: [[0, 0], [26, 0], [13, 16]], aL: lmL(LM.ASHLAR, 0.8) });
-  for (let z = -22; z > -82; z -= 9.5) for (const sx of [-1, 1]) { B.boxL(sx * 14, 10, z, 2.2, 20, 2.6, stone, lmL(LM.ASHLAR, 0.8)); B.coneL(sx * 14, z, 1.4, 20, 25, 4, stone, lmL(LM.PLAIN)); }
-  // the neo-Gothic tower on the axis
-  B.boxL(0, 24, -10, 12, 48, 12, stone, lmL(LM.WIN, 3, 9, 2));
-  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { B.boxL(dx * 6.4, 22, -10 + dz * 6.4, 2, 44, 2, shade(stone, 0.95), lmL(LM.ASHLAR, 0.8)); B.coneL(dx * 6.4, -10 + dz * 6.4, 1.4, 44, 54, 4, stone, lmL(LM.PLAIN)); }
-  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; const gx = Math.sin(a) * 6, gz = -10 + Math.cos(a) * 6; B.coneL(gx, gz, 1.8, 48, 55, 4, stone, lmL(LM.PLAIN), Math.PI / 4); }
-  B.prismL(0, -10, 4.6, 4.2, 48, 55, 8, stone, lmL(LM.WIN, 1.8, 5, 2));
-  B.coneL(0, -10, 4.4, 55, 80, 8, shade(stone, 0.85), lmL(LM.ASHLAR, 1.0));
-  B.prismL(0, -10, 0.12, 0.05, 80, 83, 4, bronze, lmL(LM.PLAIN));
-  // the king on horseback on a tall pedestal in front
-  const sz = 30;
-  B.boxL(0, 2.2, sz, 7, 4.4, 4, hex('#a39a8c'), lmL(LM.ASHLAR, 0.7));
-  B.boxL(0, 5.0, sz, 4.6, 1.4, 2.2, bronze, lmL(LM.PLAIN));
-  B.boxL(0, 6.6, sz, 3.0, 1.2, 1.0, bronze, lmL(LM.PLAIN));
-  for (const [x, z] of [[-1.1, -0.35], [-1.1, 0.35], [1.1, -0.35], [1.1, 0.35]]) B.boxL(x, 5.4 + 0.6, sz + z, 0.22, 1.2, 0.22, bronze, lmL(LM.PLAIN));
-  B.boxL(1.7, 7.6, sz, 0.6, 1.4, 0.6, bronze, lmL(LM.PLAIN));
-  B.boxL(2.05, 8.2, sz, 0.9, 0.5, 0.45, bronze, lmL(LM.PLAIN));
-  B.boxL(-0.1, 8.0, sz, 0.7, 1.6, 0.7, bronze, lmL(LM.PLAIN));
-  B.boxL(-0.1, 9.05, sz, 0.38, 0.45, 0.38, bronze, lmL(LM.PLAIN));
-  return { height: 83 };
-}
-/* ---------- Istanbul: Hagia Sophia ---------- */
-function lmHagiaSophia(B) {
-  const pink = hex('#c47a5e'), pink2 = hex('#b06a52'), lead = hex('#5d6266'), stone = hex('#e6dccb');
-  const cz = -45;
-  // low aisles and the narthex in front, stepping up to the dome
-  B.boxL(0, 9, cz, 74, 18, 76, pink, lmL(LM.WIN, 4.5, 6, 1));
-  B.boxL(0, 6, cz + 43, 62, 12, 10, pink2, lmL(LM.WIN, 3.8, 5, 1));
-  B.q([-31, 12, cz + 48], [31, 12, cz + 48], [31, 16, cz + 38], [-31, 16, cz + 38], lead, [[0, 0], [62, 0], [62, 11], [0, 11]], lmL(LM.PLAIN));
-  // the four great buttress towers round the dome square
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    B.boxL(sx * 21, 16, cz + sz * 21, 9, 32, 9, shade(pink, 0.96), lmL(LM.WIN, 3, 7, 1));
-    B.q([sx * 21 - 4.5, 32, cz + sz * 21 + 4.5], [sx * 21 + 4.5, 32, cz + sz * 21 + 4.5], [sx * 21 + 4.5, 34, cz + sz * 21 - 4.5], [sx * 21 - 4.5, 34, cz + sz * 21 - 4.5], lead, [[0, 0], [9, 0], [9, 9], [0, 9]], lmL(LM.PLAIN));
-  }
-  // side tympanum walls with their window rows, then the drum ring of forty windows and the shallow dome
-  B.boxL(0, 24, cz, 34, 12, 34, pink, lmL(LM.WIN, 3.4, 6, 1));
-  B.prismL(0, cz, 16.5, 16.5, 30, 35, 40, pink, lmL(LM.WIN, 2.6, 5, 1));
-  B.latheL(0, cz, [[16.8, 35], [16.0, 38.5], [13.5, 41.8], [9.0, 44.4], [3.0, 46.1], [0.1, 46.4]], 40, lead, lmL(LM.RIBS, 2.6, 0.25));
-  // half domes east and west, each with two smaller exedra domes
-  for (const sz of [-1, 1]) {
-    B.latheL(0, cz + sz * 17, [[16, 18], [15.2, 22.5], [12.5, 26.5], [8, 29.6], [2, 31], [0.1, 31.1]], 20, lead, lmL(LM.RIBS, 2.6, 0.25), sz > 0 ? -Math.PI / 2 : Math.PI / 2, sz > 0 ? Math.PI / 2 : Math.PI * 1.5);
-    for (const sx of [-1, 1]) B.latheL(sx * 11, cz + sz * 28, [[7, 14], [6.4, 17], [4.5, 19.5], [1.5, 20.6], [0.1, 20.7]], 12, lead, lmL(LM.PLAIN));
-  }
-  // four minarets with their balconies and pencil caps
-  for (const [x, z, h] of [[-40, cz + 40, 60], [40, cz + 40, 60], [-40, cz - 40, 62], [40, cz - 40, 58]]) {
-    B.prismL(x, z, 2.6, 2.4, 0, 12, 8, stone, lmL(LM.PLAIN));
-    B.prismL(x, z, 1.8, 1.5, 12, h - 12, 12, stone, lmL(LM.PLAIN));
-    for (const yb of [h * 0.55, h * 0.78]) { B.prismL(x, z, 2.6, 1.6, yb - 1, yb, 12, stone, lmL(LM.PLAIN), 0, true); B.prismL(x, z, 2.6, 2.6, yb, yb + 0.9, 12, shade(stone, 0.9), lmL(LM.WIN, 0.5, 0.9, 0)); }
-    B.prismL(x, z, 1.5, 1.4, h - 12, h - 9, 12, stone, lmL(LM.PLAIN));
-    B.coneL(x, z, 1.7, h - 9, h + 3, 12, lead, lmL(LM.PLAIN));
-    B.prismL(x, z, 0.08, 0.04, h + 3, h + 5, 4, hex('#c9a84a'), lmL(LM.PLAIN));
-  }
-  return { height: 65 };
-}
-/* ---------- Ohrid: St. John at Kaneo on its cliff ---------- */
-function lmKaneo(B) {
-  const brick = hex('#c18a68'), roof = hex('#a65538'), rock = hex('#8d8273');
-  // the cliff: weathered rock humps falling into the lake, pines on the slope behind the church
-  const rng = mulberry32(42);
-  for (const [x, y, z, r] of [[2, 6, -6, 15], [-10, 2, -10, 13], [14, 0, -4, 12], [6, -2, 8, 11], [-4, 9, -18, 12], [20, -5, 6, 9], [-16, -3, 2, 10], [10, 4, -20, 13]])
-    rockLump(B, x, y, z, r, shade(rock, rngRange(rng, 0.88, 1.06)), rng);
-  for (let i = 0; i < 16; i++) {
-    const x = rngRange(rng, -16, 12), z = rngRange(rng, -26, -12), y = 15 + rngRange(rng, -2, 3), h = rngRange(rng, 6, 11);
-    B.prismL(x, z, 0.3, 0.2, y - 1, y + h * 0.3, 5, hex('#4d3d2e'), lmL(LM.PLAIN));
-    B.coneL(x, z, h * 0.32, y + h * 0.2, y + h, 7, shade(hex('#2f4a2c'), rngRange(rng, 0.8, 1.1)), lmL(LM.PLAIN));
-  }
-  // the church: cross-in-square body, red tile roofs, the drum and its dome
-  const by = 15.5, cx = 4, cz = -6;
-  B.boxL(cx, by - 5, cz, 13, 10, 15, shade(rock, 0.95), lmL(LM.ASHLAR, 0.9)); // its footing on the rock
-  B.boxL(cx, by + 3.5, cz, 9, 7, 11, brick, lmL(LM.ASHLAR, 0.45));
-  B.boxL(cx, by + 4.5, cz, 13, 5, 5, brick, lmL(LM.ASHLAR, 0.45));
-  B.latheL(cx, cz - 6.5, [[2.6, by], [2.6, by + 5], [1.2, by + 6.2], [0.1, by + 6.4]], 12, brick, lmL(LM.ASHLAR, 0.45), Math.PI / 2, Math.PI * 1.5);
-  for (const [w, d, y] of [[9, 11, 7], [13, 5, 7]]) {
-    B.q([cx - w / 2 - 0.3, by + y, cz + d / 2 + 0.3], [cx + w / 2 + 0.3, by + y, cz + d / 2 + 0.3], [cx + w / 2 + 0.3, by + y + 1.6, cz], [cx - w / 2 - 0.3, by + y + 1.6, cz], roof, [[0, 0], [w, 0], [w, 3], [0, 3]], lmL(LM.TILES));
-    B.q([cx + w / 2 + 0.3, by + y, cz - d / 2 - 0.3], [cx - w / 2 - 0.3, by + y, cz - d / 2 - 0.3], [cx - w / 2 - 0.3, by + y + 1.6, cz], [cx + w / 2 + 0.3, by + y + 1.6, cz], shade(roof, 0.9), [[0, 0], [w, 0], [w, 3], [0, 3]], lmL(LM.TILES));
-  }
-  B.prismL(cx, cz, 2.3, 2.3, by + 8, by + 12.5, 8, brick, lmL(LM.WIN, 1.4, 3.4, 1));
-  B.coneL(cx, cz, 2.8, by + 12.5, by + 15, 8, roof, lmL(LM.TILES));
-  B.prismL(cx, cz, 0.06, 0.04, by + 15, by + 16.2, 4, hex('#d9c27a'), lmL(LM.PLAIN));
-  return { height: 36 };
-}
-// a rounded, noisy rock mass (a displaced icosphere)
-function rockLump(B, cx, cy, cz, r, col, rng) {
-  const ico = new THREE.IcosahedronGeometry(1, 2), pos = ico.attributes.position, ph = rng() * 10;
-  const P = (i) => {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const n = 1 + 0.18 * Math.sin(x * 3.1 + ph) * Math.sin(y * 2.7 + ph * 1.3) + 0.1 * Math.sin(z * 5.3 + ph * 0.7) + 0.06 * Math.sin((x + z) * 9.1);
-    const k = r * n;
-    return [cx + x * k * 1.25, cy + Math.max(y, -0.35) * k * 0.95, cz + z * k];
-  };
-  for (let i = 0; i < pos.count; i += 3) {
-    const a = P(i), b = P(i + 1), c = P(i + 2);
-    const cy2 = (a[1] + b[1] + c[1]) / 3 - cy;
-    B.tri(a, b, c, shade(col, 0.82 + 0.25 * clamp(cy2 / r, -0.5, 1) + 0.08 * Math.sin(i * 1.7)), { aM: [[a[0], a[1]], [b[0], b[1]], [c[0], c[1]]], aL: lmL(LM.ASHLAR, 2.2) });
-  }
-  ico.dispose();
-}
-const LANDMARK_BUILDERS = { colosseum: lmColosseum, eiffel: lmEiffel, stephansdom: lmStephansdom, parliament: lmParliament, castle: lmCastle, stmichael: lmStMichael, hagiasophia: lmHagiaSophia, kaneo: lmKaneo };
-const FLOODLIT = { eiffel: 1, parliament: 1, castle: 0.35, stmichael: 0.6, hagiasophia: 0.5, stephansdom: 0.2, colosseum: 0.25, kaneo: 0.2 };
-// where the landmark sits and how big it is, relative to the end of the street
-const LM_PLACE = { colosseum: { s: 0, x: 0 }, eiffel: { s: 60, x: 0 }, stephansdom: { s: 10, x: -6 }, parliament: { s: 10, x: 0, k: 1.15 }, castle: { s: 0, x: 0 }, stmichael: { s: 0, x: 0, k: 1.1 }, hagiasophia: { s: 10, x: 0, k: 1.3 }, kaneo: { s: 30, x: 4, k: 1.35 } };
-let LM_MATS = null;
-function buildLandmark(g) {
-  const id = g.C.landmark, fn = LANDMARK_BUILDERS[id]; if (!fn) return null;
-  if (!LM_MATS) LM_MATS = {};
-  const key = id;
-  if (!LM_MATS[key]) LM_MATS[key] = [makeLandmarkMat(false, FLOODLIT[id]), makeLandmarkMat(true, FLOODLIT[id])];
-  const B = new LB(), Bc = new LB();
-  fn(B, Bc);
-  const grp = new THREE.Group();
-  for (const [b, m] of [[B, LM_MATS[key][0]], [Bc, LM_MATS[key][1]]]) {
-    const geo = b.build(); if (!geo) continue;
-    const mesh = new THREE.Mesh(geo, m); mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = false; grp.add(mesh);
-  }
-  const P = LM_PLACE[id] || { s: 0, x: 0 };
-  const s = g.landmarkS + P.s, y = heightAt(g, Math.min(s, g.landmarkS));
-  const [x, , z] = W(g, s, P.x, 0);
-  grp.position.set(x, y - (id === 'kaneo' ? 8 : 0.2), z); grp.rotation.y = g.yaw; if (P.k) grp.scale.setScalar(P.k);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('aM', new THREE.Float32BufferAttribute(am, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, card.mat); mesh.frustumCulled = false;
+  const P = spec.place || {}, s = g.landmarkS + (P.s || 0), y = heightAt(g, Math.min(s, g.landmarkS));
+  const [x, , z] = W(g, s, P.x || 0, 0);
+  const grp = new THREE.Group(); grp.add(mesh);
+  grp.position.set(x, y + (P.y || 0) - 0.05, z); grp.rotation.y = g.yaw; if (P.k) grp.scale.setScalar(P.k);
   return grp;
 }
+
+// ---- Berlin: the Brandenburg Gate, its Quadriga, the guardhouses, the Tiergarten behind ----
+function cardBrandenburg(P, r) {
+  const sand = '#ecd8a8', sandL = '#f6e7c1', sandM = '#dcc492', sandS = '#c3a877', deep = '#7d6849', deeper = '#5f4e38';
+  const greens = ['#4f7d3c', '#5f8f48', '#3e6a33', '#6c9a52', '#557f3f'];
+  const cols = [-14.775, -9.225, -3.675, 3.675, 9.225, 14.775];
+  // a fluted Doric column: shaft, a shaded side, a lit side, flutes, the cushion capital
+  const column = (cx, y0, y1, w, base, shadeK = 1) => {
+    const hw = w / 2;
+    P.rect(cx - hw, y0, w, y1 - y0, ctone(base, shadeK), { shadow: 0.7 });
+    P.flat(R.rect(cx + hw * 0.25, y0, hw * 0.75, y1 - y0), ctone(base, 0.86 * shadeK));
+    P.flat(R.rect(cx - hw * 0.62, y0, hw * 0.34, y1 - y0), ctone(base, 1.06));
+    for (const f of [-0.45, 0, 0.45]) P.flat(R.rect(cx + f * hw - 0.03, y0 + 0.2, 0.06, y1 - y0 - 0.4), ctone(base, 0.9 * shadeK));
+    P.poly([[cx - hw, y1], [cx + hw, y1], [cx + hw * 1.25, y1 + w * 0.22], [cx - hw * 1.25, y1 + w * 0.22]], ctone(base, 1.02 * shadeK), { shadow: 0.4 });
+    P.rect(cx - hw * 1.32, y1 + w * 0.22, w * 1.32, w * 0.24, ctone(base, 1.05 * shadeK), { shadow: 0.5 });
+  };
+
+  // the Tiergarten, and the Victory Column far down the axis, seen through the middle passage
+  P.on('trees');
+  P.trees(-52, 52, 0.5, 12, 21, greens);
+  P.hedge(-52, 52, 0, 4.2, ['#46703a', '#3c6332', '#527f40']);
+  P.rect(-0.5, 1.5, 1.0, 11.6, '#b9a27e', { flood: 0.5 });
+  P.rect(-0.9, 1.5, 1.8, 2.2, '#a58e6b', { flood: 0.5 });
+  P.rect(-0.75, 8.2, 1.5, 0.5, '#d9b450', { flood: 0.5 });
+  P.poly([[-0.45, 13.1], [0.45, 13.1], [0.25, 15.2], [0, 15.6], [-0.25, 15.2]], '#e2b13c', { flood: 1 });
+  P.poly([[0, 14.6], [1.1, 15.6], [0.2, 15.1]], '#e8bd48', { flood: 1, shadow: 0.4 });
+  P.poly([[0, 14.6], [-1.1, 15.6], [-0.2, 15.1]], '#e8bd48', { flood: 1, shadow: 0.4 });
+
+  // the far row of columns and the shaded passages under the roof
+  P.on('back');
+  P.rect(-16.2, 0, 32.4, 1.0, sandS, { shadow: 0 });
+  P.rect(-16.2, 12.0, 32.4, 3.4, deeper, { shadow: 0 });
+  P.flat(R.rect(-16.2, 12.0, 32.4, 0.5), deep);
+  for (const c of cols) column(c, 1.0, 12.4, 1.6, '#bfa476', 0.86);
+  P.rect(-16.2, 14.6, 32.4, 0.8, '#a88f66', { shadow: 0.4 });
+
+  // the guardhouses and the low walls joining them to the gate
+  P.on('wings');
+  for (const s of [-1, 1]) {
+    const X = (x) => s * x, xs = (a, b) => [Math.min(X(a), X(b)), Math.abs(b - a)];
+    let [x, w] = xs(19.4, 24.6);
+    P.rect(x, 0, w, 6.0, sandM, { shadow: 0.6 });
+    P.flat(R.rect(x, 5.4, w, 0.6), sandL);
+    P.win(s > 0 ? 21.1 : -22.9, 1.0, 1.8, 3.6, { top: 'arch', col: '#a48b62', lit: 0 });
+    [x, w] = xs(24.6, 34.4);
+    P.rect(x, 0, w, 0.8, sandS, { shadow: 0 });
+    P.rect(x + 0.3, 0.8, w - 0.6, 7.9, '#d6be8c', { shadow: 0.5 });
+    P.win(s > 0 ? 28.7 : -30.3, 0.8, 1.6, 4.4, { top: 'arch', col: '#5a4936', lit: 0.4 });
+    for (const cx of [25.5, 27.9, 31.1, 33.5]) column(X(cx), 0.8, 8.0, 0.95, sand);
+    P.rect(x, 8.5, w, 1.2, sandL, { shadow: 0.6 });
+    P.flat(R.rect(x, 8.5, w, 0.3), sandM);
+    P.poly([[x - 0.2, 9.7], [x + w + 0.2, 9.7], [x + w / 2, 12.1]], sand, { shadow: 0.7 });
+    P.flat([[x + 1.0, 9.95], [x + w - 1.0, 9.95], [x + w / 2, 11.55]], sandM);
+  }
+
+  // the gate: steps, end blocks, six columns, the frieze, the attic
+  P.on('gate');
+  P.rect(-20.2, 0, 40.4, 1.0, '#d8c08e', { shadow: 0 });
+  P.flat(R.rect(-20.2, 0.48, 40.4, 0.06), sandS);
+  for (const s of [-1, 1]) {
+    const x = s > 0 ? 15.65 : -19.6;
+    P.rect(x, 1.0, 3.95, 14.0, sand, { shadow: 0.6 });
+    P.flat(R.rect(x + (s > 0 ? 2.9 : 0), 1.0, 1.05, 14.0), ctone(sand, s > 0 ? 0.88 : 1.04));
+    P.win(x + 1.0, 3.4, 1.95, 7.2, { top: 'arch', col: '#bda473', lit: 0 });
+    P.ell(x + 1.975, 8.6, 0.32, 0.36, '#d9c391', { shadow: 0.3, edge: 0.5 });
+    P.poly([[x + 1.6, 3.4], [x + 2.35, 3.4], [x + 2.25, 8.2], [x + 1.7, 8.2]], '#d9c391', { shadow: 0.4, edge: 0.5 });
+    P.rect(x + 0.6, 11.6, 2.75, 2.2, sandM, { shadow: 0.3, edge: 0.6 });
+  }
+  for (const c of cols) column(c, 1.0, 14.2, 1.75, sandL);
+  P.rect(-19.6, 14.62, 39.2, 1.5, '#efdcae', { shadow: 0.8 });
+  P.rect(-19.6, 16.1, 39.2, 1.6, sandM, { shadow: 0.5 });
+  for (let x = -19.2, i = 0; x < 19.3; x += 1.385, i++) {
+    P.rect(x - 0.3, 16.2, 0.6, 1.42, '#cdb27e', { shadow: 0.3, edge: 0.5, hi: 0.6 });
+    P.flat(R.rect(x - 0.12, 16.3, 0.06, 1.2), '#a98f61'); P.flat(R.rect(x + 0.06, 16.3, 0.06, 1.2), '#a98f61');
+    if (x + 0.7 < 19.2) { P.flat(R.ell(x + 0.69, 16.85, 0.18, 0.3, 10), '#c9ad78'); P.flat(R.ell(x + 0.69, 17.2, 0.12, 0.11, 8), '#c9ad78'); }
+  }
+  for (let x = -19.9; x < 19.9; x += 0.42) P.flat(R.rect(x, 17.55, 0.22, 0.2), '#cbb07c');
+  P.rect(-20.2, 17.75, 40.4, 0.9, '#f5e5bd', { shadow: 1.2 });
+  P.rect(-18.8, 18.65, 37.6, 2.3, sand, { shadow: 0.9 });
+  P.rect(-13.6, 19.0, 27.2, 1.65, '#dac28e', { shadow: 0, edge: 0, hi: 0.6 });
+  for (let x = -13.2; x < 13.2; x += 0.55) {
+    const h = 0.9 + r() * 0.45;
+    P.flat(R.ell(x + 0.2, 19.15 + h * 0.5, 0.14 + r() * 0.08, h * 0.5, 8), r() < 0.5 ? '#c7ab76' : '#e6d1a0');
+  }
+  for (const s of [-1, 1]) P.rect(s > 0 ? 14.3 : -18.1, 19.0, 3.8, 1.65, '#dac28e', { shadow: 0, edge: 0, hi: 0.6 });
+  P.rect(-19.2, 20.95, 38.4, 0.4, '#f2e1b8', { shadow: 0.7 });
+  P.rect(-8.2, 21.35, 16.4, 0.55, sandM, { shadow: 0.6 });
+  P.rect(-7.4, 21.9, 14.8, 0.7, '#e4cf9f', { shadow: 0.7 });
+
+  // the Quadriga: four horses abreast, the chariot, Victoria with her staff, wreath and eagle
+  P.on('quadriga');
+  const cu = '#5d9c86', cuD = '#3f7464', cuL = '#88c2aa', cu2 = '#4f8d78', y = 22.6;
+  P.ell(-2.05, y + 1.2, 0.95, 0.95, cuD, { flood: 0.8 }); P.ell(2.05, y + 1.2, 0.95, 0.95, cuD, { flood: 0.8 });
+  P.poly([[-1.7, y], [1.7, y], [1.9, y + 1.9], [1.2, y + 2.3], [-1.2, y + 2.3], [-1.9, y + 1.9]], cuD, { flood: 0.8 });
+  // Victoria
+  P.poly([[-0.3, y + 4.75], [-2.6, y + 7.2], [-2.9, y + 6.4], [-2.2, y + 5.6], [-2.5, y + 5.3], [-1.6, y + 4.8], [-1.8, y + 4.4], [-0.6, y + 4.3]], cu2, { flood: 0.8, shadow: 0.5 });
+  P.poly([[0.3, y + 4.75], [2.6, y + 7.2], [2.9, y + 6.4], [2.2, y + 5.6], [2.5, y + 5.3], [1.6, y + 4.8], [1.8, y + 4.4], [0.6, y + 4.3]], cu2, { flood: 0.8, shadow: 0.5 });
+  P.poly([[-0.85, y + 1.4], [0.85, y + 1.4], [0.5, y + 4.6], [0.38, y + 5.1], [-0.38, y + 5.1], [-0.5, y + 4.6]], cu, { flood: 0.8 });
+  P.flat(R.rect(-0.25, y + 1.6, 0.14, 3.0), cuD); P.flat(R.rect(0.2, y + 1.6, 0.12, 3.0), cuL);
+  P.ell(0, y + 5.5, 0.34, 0.4, cu, { flood: 0.8, shadow: 0.5 });
+  P.line([[-0.32, y + 4.8], [-0.9, y + 5.9], [-1.15, y + 6.6]], 0.22, cu, { flood: 0.8, cap: 'round' });
+  P.line([[-1.2, y + 3.2], [-1.2, y + 8.4]], 0.14, cuD, { flood: 0.8 });
+  P.piece([R.ell(-1.2, y + 8.0, 0.55, 0.55, 20), R.ell(-1.2, y + 8.0, 0.36, 0.36, 20)], cu, { flood: 0.8, shadow: 0.5 });
+  P.flat(R.rect(-1.38, y + 7.95, 0.36, 0.1), cuD); P.flat(R.rect(-1.25, y + 7.8, 0.1, 0.36), cuD);
+  P.poly([[-1.2, y + 8.6], [-0.4, y + 9.1], [-0.75, y + 8.75], [-1.2, y + 8.9], [-1.65, y + 8.75], [-2.0, y + 9.1]], cuD, { flood: 0.8, shadow: 0.4 });
+  // the horses, outer ones turned a little outward
+  [[-2.85, -0.35, cu2], [-0.95, -0.1, cu], [0.95, 0.1, cu2], [2.85, 0.35, cu]].forEach(([cx, tilt, c], i) => {
+    const up = i % 2 ? 0.25 : 0;
+    P.line([[cx - 0.32, y], [cx - 0.3, y + 1.4]], 0.24, cuD, { flood: 0.8 });
+    P.line([[cx + 0.3, y + 1.5], [cx + 0.5 + tilt * 0.3, y + 1.95 + up], [cx + 0.38 + tilt * 0.3, y + 1.2 + up]], 0.24, cuD, { flood: 0.8, cap: 'round' });
+    P.ell(cx, y + 2.0, 0.72, 1.05, c, { flood: 0.8, shadow: 0.6 });
+    P.poly([[cx - 0.45, y + 2.6], [cx + 0.45, y + 2.6], [cx + 0.32 + tilt, y + 3.95 + up], [cx - 0.3 + tilt, y + 3.95 + up]], c, { flood: 0.8, shadow: 0.5 });
+    const hx = cx + tilt * 1.35, hy = y + 3.6 + up;
+    P.poly([[hx - 0.2, hy], [hx + 0.2, hy], [hx + 0.3, hy + 0.95], [hx + 0.22, hy + 1.32], [hx + 0.3, hy + 1.62], [hx + 0.12, hy + 1.38], [hx - 0.12, hy + 1.38], [hx - 0.3, hy + 1.62], [hx - 0.22, hy + 1.32], [hx - 0.3, hy + 0.95]], c, { flood: 0.8, shadow: 0.6 });
+    P.flat(R.rect(hx - 0.2, hy + 0.15, 0.1, 1.0), cuL);
+    P.flat(R.ell(cx - 0.32, y + 2.2, 0.12, 0.6, 10), cuL);
+  });
+}
+
+// ---- Paris: the Eiffel Tower at dusk, the Champ de Mars trees behind, a carousel and lamps in front ----
+function cardEiffel(P, r) {
+  const iron = '#7a4f34', ironL = '#946240', ironD = '#5e3b27', band = '#8a5b3b', spark = 1;
+  const lerpPts = (pts) => (y) => { for (let i = 1; i < pts.length; i++) if (y <= pts[i][0]) { const [y0, x0] = pts[i - 1], [y1, x1] = pts[i]; return x0 + (x1 - x0) * (y - y0) / (y1 - y0); } return pts[pts.length - 1][1]; };
+  const outer = lerpPts([[0, 62], [20, 55], [40, 48.6], [57, 43.4], [64, 40.8], [90, 31.2], [115, 23.6], [121, 22.4], [160, 15.4], [200, 10.6], [240, 7.8], [276, 5.9]]);
+  const inner1 = lerpPts([[0, 38.5], [20, 34.2], [40, 29.6], [57, 25.6]]);
+  const inner2 = lerpPts([[63.5, 21.8], [90, 12.8], [112, 3.2], [115, 0]]);
+  // a lattice panel between two edges: edge members, ties, crossed diagonals
+  const lattice = (xa, xb, y0, y1, cell, wEdge = 1.5, wDiag = 0.55) => {
+    const n = Math.max(1, Math.round((y1 - y0) / cell));
+    P.line([[xa(y0), y0], ...Array.from({ length: 12 }, (_, i) => [xa(y0 + (y1 - y0) * (i + 1) / 12), y0 + (y1 - y0) * (i + 1) / 12])], wEdge, iron, { spark });
+    P.line([[xb(y0), y0], ...Array.from({ length: 12 }, (_, i) => [xb(y0 + (y1 - y0) * (i + 1) / 12), y0 + (y1 - y0) * (i + 1) / 12])], wEdge, iron, { spark });
+    for (let i = 0; i < n; i++) {
+      const ya = y0 + (y1 - y0) * i / n, yb = y0 + (y1 - y0) * (i + 1) / n;
+      P.line([[xa(ya), ya], [xb(yb), yb]], wDiag, ironL, { spark, shadow: 0 });
+      P.line([[xb(ya), ya], [xa(yb), yb]], wDiag, ironL, { spark, shadow: 0 });
+      P.line([[xa(yb), yb], [xb(yb), yb]], wDiag * 1.2, iron, { spark, shadow: 0 });
+    }
+  };
+
+  P.on('gardens');
+  P.trees(-100, 100, 0, 13, 21, ['#3d5a3a', '#4a6a44', '#34503a', '#57774a']);
+  P.hedge(-100, 100, 0, 3.6, ['#3b5838', '#466645', '#33503a']);
+
+  P.on('tower');
+  // stone feet
+  for (const s of [-1, 1]) P.poly([[s * 63, 0], [s * 37.5, 0], [s * 38.2, 4], [s * 62.2, 4]], '#b7a184', { flood: 0.9 });
+  // the great arch between the feet, and the girder under the first floor
+  P.piece([R.arc(0, 3, 38.6, 37.2, 0, Math.PI, 40).concat(R.arc(0, 3, 35.8, 34.4, Math.PI, 0, 40))], band, { spark: 0.6, shadow: 0.5 });
+  for (let a = 0.12; a < Math.PI - 0.05; a += 0.16) P.line([[Math.cos(a) * 35.8, 3 + Math.sin(a) * 34.4], [Math.cos(a + 0.08) * 38.6, 3 + Math.sin(a + 0.08) * 37.2]], 0.35, ironL, { spark, shadow: 0 });
+  lattice((y) => -inner1(y), (y) => inner1(y), 48.5, 57, 8.5, 1.2, 0.5);
+  // the four legs (two seen), up to the first floor and on to the second
+  for (const s of [-1, 1]) {
+    lattice((y) => s * outer(y), (y) => s * inner1(y), 3.5, 57, 9);
+    lattice((y) => s * outer(y), (y) => s * inner2(y), 63.5, 115, 8.6);
+    P.line([[s * (outer(4) - 7), 4], [s * (outer(56) - 4), 56]], 0.7, ironD, { spark, shadow: 0 });
+  }
+  // first floor: a deck with its row of little arches and the glazed pavilions
+  P.poly([[-outer(57) - 1.6, 56.6], [outer(57) + 1.6, 56.6], [outer(63.5) + 1.2, 63.6], [-outer(63.5) - 1.2, 63.6]], band, { spark: 0.4 });
+  for (let x = -40; x <= 40; x += 3.4) P.win(x - 1.0, 57.6, 2.0, 3.6, { top: 'arch', col: '#4a2e1f', litP: 0.5 });
+  P.flat(R.rect(-outer(63.5) - 1.2, 63.0, 2 * outer(63.5) + 2.4, 0.6), ironL);
+  for (const s of [-1, 1]) P.rect(s > 0 ? 14 : -26, 63.6, 12, 4.2, '#6b4530', { spark: 0.3 });
+  for (const s of [-1, 1]) for (let x = 15; x < 25; x += 2) P.win(s > 0 ? x : -x - 1.2, 64.3, 1.2, 2.6, { col: '#3a2418', litP: 0.9 });
+  // second floor
+  P.poly([[-outer(115) - 1.4, 114.5], [outer(115) + 1.4, 114.5], [outer(121) + 1.0, 121.4], [-outer(121) - 1.0, 121.4]], band, { spark: 0.4 });
+  for (let x = -21; x <= 20; x += 2.6) P.win(x, 116.2, 1.4, 3.2, { col: '#3a2418', litP: 0.85 });
+  // the long climb to the top
+  lattice((y) => -outer(y), (y) => outer(y), 121.4, 276, 10.2, 1.3, 0.45);
+  for (const y of [158, 197, 236]) P.flat(R.rect(-outer(y), y - 0.6, 2 * outer(y), 1.2), ironD);
+  // the top: deck, lantern, the mast
+  P.rect(-7.6, 275.4, 15.2, 2.4, band, { spark: 0.4 });
+  P.rect(-5.4, 277.8, 10.8, 6.2, '#6a4430', { spark: 0.3 });
+  for (let x = -4.4; x < 4.4; x += 1.8) P.win(x, 279.2, 1.0, 3.2, { col: '#3a2418', litP: 1 });
+  P.poly([[-5.8, 284], [5.8, 284], [3.2, 288.5], [-3.2, 288.5]], band);
+  P.rect(-2.0, 288.5, 4.0, 5.5, iron); P.ell(0, 295.0, 2.4, 1.6, ironL);
+  P.line([[0, 296], [0, 324]], 0.9, ironD, { spark });
+  for (const y of [302, 309, 316]) P.flat(R.rect(-0.9, y, 1.8, 0.6), ironD);
+
+  // in front: a carousel and two lamps on the left, trees on both sides
+  P.on('frontL');
+  P.tree(-54, 0, 7, 14); P.tree(-21, 0, 6, 12);
+  const cx = -38, red = '#c23a36', cream = '#f2e6cc';
+  P.rect(cx - 7.2, 0, 14.4, 1.1, '#6d4a35', { flood: 0.4 });
+  for (let x = cx - 6; x <= cx + 6; x += 2) P.line([[x, 1.1], [x, 5.4]], 0.22, '#e3c26a', { flood: 0.5 });
+  [[-4.2, '#f3ece0'], [-0.4, '#e6c48a'], [3.4, '#f3ece0']].forEach(([dx, c]) => {
+    const x = cx + dx; P.poly([[x - 1.2, 2.0], [x + 1.3, 2.0], [x + 1.6, 3.2], [x + 1.0, 3.7], [x - 0.9, 3.2], [x - 1.6, 3.4], [x - 1.3, 2.6]], c, { flood: 0.5, shadow: 0.5 });
+    P.line([[x - 0.9, 2.0], [x - 1.1, 1.2]], 0.18, c, { flood: 0.5 }); P.line([[x + 0.9, 2.0], [x + 1.2, 1.2]], 0.18, c, { flood: 0.5 });
+  });
+  P.rect(cx - 7.6, 5.3, 15.2, 0.9, '#e3c26a', { flood: 0.6 });
+  for (let i = 0; i < 8; i++) P.piece([[cx - 7.6 + i * 1.9, 6.2], [cx - 5.7 + i * 1.9, 6.2], [cx, 10.4]], i % 2 ? red : cream, { flood: 0.6, shadow: 0.4 });
+  P.poly([[cx - 0.5, 10.3], [cx + 0.5, 10.3], [cx, 11.6]], '#e3c26a', { flood: 0.6 });
+  for (let x = cx - 7.2; x <= cx + 7.4; x += 1.2) P.win(x - 0.18, 5.55, 0.36, 0.36, { col: '#ffe6a8', lit: 1 });
+  for (const lx of [-27.5, -49]) {
+    P.line([[lx, 0], [lx, 4.6]], 0.22, '#2a2420', { flood: 0 });
+    P.win(lx - 0.35, 4.6, 0.7, 0.9, { col: '#f5d58a', lit: 1 });
+    P.poly([[lx - 0.5, 5.5], [lx + 0.5, 5.5], [lx, 6.1]], '#2a2420', { flood: 0 });
+  }
+  P.on('frontR');
+  P.tree(54, 0, 7, 14); P.tree(43, 0, 7, 12.5); P.tree(22, 0, 6, 12);
+  for (const lx of [30, 48.5]) {
+    P.line([[lx, 0], [lx, 4.6]], 0.22, '#2a2420', { flood: 0 });
+    P.win(lx - 0.35, 4.6, 0.7, 0.9, { col: '#f5d58a', lit: 1 });
+    P.poly([[lx - 0.5, 5.5], [lx + 0.5, 5.5], [lx, 6.1]], '#2a2420', { flood: 0 });
+  }
+}
+
+// ---- Rome: the Colosseum (whole on the left, broken on the right), the Arch of Constantine, umbrella pines ----
+function cardColosseum(P, r) {
+  const trav = '#efcb8f', travM = '#dcb47a', travS = '#bf915d', hole = '#7a4a2a', holeD = '#5d371f', brick = '#b8664a', brickD = '#8f4a33';
+  const RX = 92, N = 38, T = (84 * Math.PI) / 180;
+  const bays = [];
+  for (let i = 0; i < N; i++) { const a0 = -T + (2 * T * i) / N, a1 = -T + (2 * T * (i + 1)) / N; bays.push({ x0: RX * Math.sin(a0), x1: RX * Math.sin(a1), a: (a0 + a1) / 2 }); }
+  const light = (a) => 0.74 + 0.26 * Math.cos(a - 0.35);
+  const storeys = [[1.4, 11.9], [11.9, 23.3], [23.3, 34.5]];
+  const BREAK = 14;
+
+  // the seating inside, seen over the broken side
+  P.on('cavea');
+  const caveTop = R.ragged(-6, 92, (x) => 37 - x * 0.08 + Math.sin(x * 0.21) * 1.6, 2.4, 1.1, r);
+  P.poly([[-6, 0], ...caveTop, [92, 0]], '#c48d5c', { shadow: 0 });
+  for (let y = 6; y < 40; y += 2.3) P.flat(R.rect(-6, y, 98, 0.55), '#a8744a', { atop: true });
+  for (let x = -2; x < 90; x += 7.5) { const y = 8 + ((x * 7) % 19); P.flat(R.arch(x, y, 2.2, 3.6), '#6e4428', { atop: true }); }
+
+  // the inner ring, all that stands where the outer wall fell
+  P.on('inner');
+  const innerTop = R.ragged(8, 92, (x) => 31 - Math.max(0, x - 40) * 0.09 + Math.sin(x * 0.33) * 1.8, 1.8, 1.4, r);
+  P.poly([[8, 0], ...innerTop, [92, 0]], travM, { shadow: 0.5 });
+  for (const b of bays) {
+    if (b.x1 < 9 || b.x0 > 91) continue;
+    const w = b.x1 - b.x0, k = light(b.a) * 0.92;
+    for (const [y0, y1] of storeys.slice(0, 2)) {
+      P.flat(R.rect(b.x0, y1 - 1.0, w, 1.0), ctone(trav, k), { atop: true });
+      P.flat(R.arch(b.x0 + w * 0.2, y0 + 0.5, w * 0.6, (y1 - y0) * 0.66), ctone(hole, k), { atop: true });
+    }
+  }
+  for (let x = 10; x < 92; x += 6.5) P.flat(R.rect(x, 0, 0.6, 30), ctone(travS, 0.9), { atop: true });
+
+  // the outer wall: three arcades and the attic, curving away at the sides, ended by the brick buttress
+  P.on('outer');
+  P.rect(-92, 0, 106 + 18, 1.4, travS, { shadow: 0 });
+  P.poly([[-92, 1.4], [BREAK, 1.4], [BREAK, 48.6], [-92, 48.6]], trav, { shadow: 0.6 });
+  for (const b of bays) {
+    if (b.x0 >= BREAK) continue;
+    const x1 = Math.min(b.x1, BREAK), w = b.x1 - b.x0, k = light(b.a);
+    P.flat(R.rect(b.x0, 1.4, x1 - b.x0, 47.2), ctone(trav, k));
+    storeys.forEach(([y0, y1], si) => {
+      const aw = w * 0.56, ax = b.x0 + (w - aw) / 2;
+      if (ax + aw <= BREAK) P.win(ax, y0 + 0.45, aw, (y1 - y0) * 0.68, { top: 'arch', col: ctone(hole, k), lit: 0 });
+      P.flat(R.rect(b.x0 + w * 0.02, y0, w * 0.12, y1 - y0 - 1.1), ctone(trav, k * 1.07));
+      P.flat(R.rect(b.x0, y1 - 1.25, x1 - b.x0, 1.25), ctone(travM, k * (si % 2 ? 1.02 : 0.97)));
+      P.flat(R.rect(b.x0, y1 - 0.35, x1 - b.x0, 0.2), ctone(travS, k));
+    });
+    // the attic: pilasters, small windows in every other bay, a row of corbels
+    P.flat(R.rect(b.x0 + w * 0.02, 34.5, w * 0.1, 12.5), ctone(trav, k * 1.06));
+    if ((bays.indexOf(b) & 1) === 0 && b.x0 + w * 0.75 < BREAK) P.win(b.x0 + w * 0.36, 38.4, w * 0.28, 2.6, { col: ctone(holeD, k), lit: 0 });
+    for (let x = b.x0 + w * 0.25; x < x1; x += w * 0.5) P.flat(R.rect(x, 45.2, w * 0.08, 0.7), ctone(travS, k));
+    P.flat(R.rect(b.x0, 47.6, x1 - b.x0, 1.0), ctone(travM, k));
+  }
+  // the 19th-century brick buttress holding up the broken end
+  P.poly([[BREAK - 1.5, 1.4], [33, 1.4], [33, 4], [BREAK + 2.5, 48.6], [BREAK - 1.5, 48.6]], brick, { shadow: 1 });
+  for (let y = 3; y < 48; y += 1.1) P.flat(R.rect(BREAK - 1.5, y, 36, 0.12), brickD, { atop: true });
+  for (let y = 6; y < 44; y += 9) { const xr = BREAK + 2.5 + (33 - BREAK - 2.5) * (1 - (y + 3) / 48.6); P.flat(R.arch(BREAK + 1.5, y, Math.max(1, (xr - BREAK) * 0.35), 4.5), '#6b3626', { atop: true }); }
+
+  // umbrella pines and cypresses
+  P.on('pines');
+  const pine = (x, h, w) => {
+    P.line([[x, 0], [x - 0.6, h * 0.45], [x + 0.4, h * 0.78]], 0.7, '#6f533c', { flood: 0 });
+    P.line([[x + 0.2, h * 0.6], [x + w * 0.22, h * 0.84]], 0.4, '#6f533c', { flood: 0 });
+    for (let i = 0; i < 7; i++) P.piece(R.ell(x + (r() - 0.5) * w * 0.7, h * (0.8 + r() * 0.12), w * (0.18 + r() * 0.12), h * 0.07 + r() * 1.2, 20), pick(r, ['#4f6a33', '#5d7a3c', '#43602d', '#668444']), { flood: 0, shadow: 0.7, jitter: 0.05 });
+  };
+  const cypress = (x, h) => P.piece(R.sym(x, 0, [[0.4, 0], [0.9, h * 0.12], [1.15, h * 0.4], [0.8, h * 0.75], [0.3, h * 0.94], [0, h]]), '#3c5a32', { flood: 0, shadow: 0.7 });
+  pine(26, 19, 15); pine(-31, 17, 11); cypress(17.5, 15); cypress(20.5, 12.5); cypress(-24, 14);
+
+  // the Arch of Constantine in front: three openings, free-standing columns with captives above, the attic
+  P.on('arco');
+  const mar = '#ecdfc4', marM = '#d8c7a6', marS = '#bba684', cx = -6;
+  P.piece([R.rect(cx - 12.95, 0, 25.9, 15.6), R.arch(cx - 3.25, 0, 6.5, 11.5), R.arch(cx - 10.4, 0, 3.4, 7.4), R.arch(cx + 7.0, 0, 3.4, 7.4)], mar, { shadow: 0.8 });
+  P.flat(R.rect(cx - 12.95, 0, 25.9, 1.0), marS);
+  for (const ox of [-12.4, -5.0, 3.6, 11.0]) {
+    P.rect(cx + ox - 0.1, 0, 1.6, 2.6, marM, { shadow: 0.6 });
+    P.rect(cx + ox + 0.05, 2.6, 1.3, 9.4, '#e4cfa8', { shadow: 0.9 });
+    P.flat(R.rect(cx + ox + 0.75, 2.6, 0.45, 9.4), ctone('#e4cfa8', 0.85));
+    P.rect(cx + ox - 0.15, 12.0, 1.9, 0.9, marM, { shadow: 0.5 });
+    P.rect(cx + ox + 0.3, 15.6, 1.1, 2.6, '#cdb894', { shadow: 0.6 });
+    P.ell(cx + ox + 0.85, 18.55, 0.42, 0.45, '#cdb894', { shadow: 0.4 });
+  }
+  for (const ox of [-8.6, 8.6]) { P.piece([R.ell(cx + ox, 9.6, 1.25, 1.25, 24), R.ell(cx + ox, 9.6, 1.0, 1.0, 24)], marS, { shadow: 0.3, edge: 0.4 }); P.flat(R.ell(cx + ox, 9.6, 1.0, 1.0, 24), '#cdb894'); }
+  P.rect(cx - 13.3, 12.9, 26.6, 0.9, '#f3e7cf', { shadow: 1 });
+  P.rect(cx - 12.95, 13.8, 25.9, 6.6, mar, { shadow: 0.8 });
+  P.rect(cx - 5.2, 14.6, 10.4, 5.0, marM, { shadow: 0.2, edge: 0.4 });
+  for (let i = 0; i < 4; i++) P.flat(R.rect(cx - 4.4, 15.4 + i * 1.1, 8.8 - (i === 3 ? 3 : 0), 0.35), '#a7916d');
+  for (const ox of [-9.8, 6.6]) P.flat(R.rect(cx + ox, 14.7, 3.2, 4.6), '#cdb894');
+  P.rect(cx - 13.2, 20.4, 26.4, 0.7, '#f3e7cf', { shadow: 0.7 });
+}
+
+// ---- Vienna: St Stephen's Cathedral: the west front, the zig-zag tiled roof, the South Tower, a fiaker ----
+function cardStephansdom(P, r) {
+  const st = '#d8c8a5', stM = '#c6b491', stS = '#a9977a', dk = '#463d33', gl = '#3b3530', cu = '#6d9c86';
+  const gwin = (x, y, w, h, o = {}) => P.win(x, y, w, h, { top: 'pointed', col: gl, litP: 0.2, ...o });
+  const crockets = (x0, y0, x1, y1, n, size, col = st) => { for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; P.flat(R.ell(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, size, size * 0.75, 8), col); } };
+  const pinnacle = (cx, y, w, h, col = st) => { P.rect(cx - w / 2, y, w, h * 0.42, col, { shadow: 0.4, edge: 0.6 }); P.poly(R.spike(cx, y + h * 0.42, w * 1.15, h * 0.58), col, { shadow: 0.4, edge: 0.6 }); crockets(cx - w * 0.55, y + h * 0.45, cx, y + h, 3, w * 0.22); crockets(cx + w * 0.55, y + h * 0.45, cx, y + h, 3, w * 0.22); };
+
+  // the South Tower, 136 m
+  P.on('south');
+  const tx = 26;
+  P.rect(tx - 6.6, 0, 13.2, 54, stM, { shadow: 0.5 });
+  for (const s of [-1, 1]) P.flat(R.rect(tx + s * 6.6 - (s > 0 ? 1.4 : 0), 0, 1.4, 54), ctone(stM, s > 0 ? 0.86 : 1.05));
+  for (const y of [10, 25, 39]) gwin(tx - 1.6, y, 3.2, 10);
+  P.rect(tx - 5.6, 53.5, 11.2, 22, st, { shadow: 0.6 });
+  gwin(tx - 1.4, 56, 2.8, 14); gwin(tx - 4.5, 57, 1.7, 11); gwin(tx + 2.8, 57, 1.7, 11);
+  for (const gx of [-3.6, 0, 3.6]) { P.poly(R.spike(tx + gx, 70.5, 3.4, 8.5), st, { shadow: 0.6 }); P.flat(R.pointed(tx + gx - 0.7, 71.5, 1.4, 4.2), stS); crockets(tx + gx - 1.7, 70.5, tx + gx, 79, 4, 0.32); crockets(tx + gx + 1.7, 70.5, tx + gx, 79, 4, 0.32); }
+  for (const s of [-1, 1]) pinnacle(tx + s * 6.1, 62, 1.3, 15);
+  P.poly([[tx - 4.7, 75], [tx + 4.7, 75], [tx + 0.45, 133], [tx - 0.45, 133]], stM, { shadow: 0.7, grad: [tx - 4.7, 0, tx + 4.7, 0, 0.12] });
+  for (let y = 80; y < 126; y += 5.2) { const hw = 4.7 * (1 - (y - 75) / 58); for (let x = -hw + 0.7; x < hw - 0.9; x += Math.max(1.1, hw * 0.55)) P.flat(R.pointed(tx + x, y, Math.min(0.9, hw * 0.32), 2.6), dk, { win: 0 }); }
+  for (const s of [-1, 1]) crockets(tx + s * 4.7, 75, tx + s * 0.45, 133, 20, 0.5);
+  P.ell(tx, 134.2, 0.9, 0.9, '#c9a64a', { flood: 1 });
+  P.poly([[tx, 135.2], [tx + 1.3, 136.4], [tx + 0.3, 136.0], [tx, 137.0], [tx - 0.3, 136.0], [tx - 1.3, 136.4]], '#2c2a26');
+
+  // the unfinished North Tower with its Renaissance cap
+  P.on('north');
+  const nx = -26;
+  P.rect(nx - 6, 0, 12, 64, stM, { shadow: 0.5 });
+  P.flat(R.rect(nx - 6, 0, 1.4, 64), ctone(stM, 1.05)); P.flat(R.rect(nx + 4.6, 0, 1.4, 64), ctone(stM, 0.87));
+  for (const y of [14, 32, 48]) gwin(nx - 1.5, y, 3.0, 11);
+  P.rect(nx - 6.6, 63.5, 13.2, 1.4, st);
+  P.piece(R.bell(nx, 64.9, 12, 9.5), cu, { flood: 0.5 });
+  P.rect(nx - 1.2, 73.4, 2.4, 2.6, cu, { flood: 0.5 }); P.piece(R.onion(nx, 76, 2.6, 3.4), cu, { flood: 0.5 });
+  P.line([[nx, 79.4], [nx, 81.5]], 0.2, '#c9a64a');
+
+  // the great roof with its zig-zag glazed tiles
+  P.on('roof');
+  const roof = [[-21.5, 29], [21.5, 29], [6.5, 62], [-6.5, 62]];
+  P.poly(roof, '#2f4a3c', { shadow: 0.4 });
+  const stripes = ['#d9aa3a', '#ece4d1', '#1f2420', '#3f7a52', '#d9aa3a', '#1f2420'];
+  for (let k = 0, y = 30.5; y < 62; y += 2.3, k++) {
+    const top = [], bot = [];
+    for (let x = -23, i = 0; x <= 23; x += 2.6, i++) { const yy = y + (i % 2 ? 1.25 : 0); top.push([x, yy + 0.85]); bot.push([x, yy]); }
+    P.flat([...bot, ...top.reverse()], stripes[k % stripes.length], { atop: true });
+  }
+  P.line([[-6.5, 62], [6.5, 62]], 0.5, '#c9b38a');
+  for (const x of [-4, 0, 4]) P.flat(R.rect(x - 0.3, 62, 0.6, 1.4), '#c9b38a');
+
+  // the west front: side chapels, the two Heathen Towers, the Giant's Door, the great window, the gable
+  P.on('front');
+  P.rect(-22, 0, 44, 1.2, stS, { shadow: 0 });
+  for (const s of [-1, 1]) {
+    const x0 = s > 0 ? 15.6 : -21.6;
+    P.rect(x0, 1.2, 6, 20.5, st, { shadow: 0.6 });
+    gwin(x0 + 1.6, 6, 2.8, 11);
+    for (const bx of [0, 5.0]) P.rect(x0 + bx, 1.2, 1.0, 20.5, stM, { shadow: 0.4, edge: 0.6 });
+    P.poly(R.spike(x0 + 3, 21.7, 5.4, 5.2), st, { shadow: 0.6 });
+    pinnacle(x0 + 0.5, 21.7, 0.9, 6.5); pinnacle(x0 + 5.5, 21.7, 0.9, 6.5);
+    // a Heathen Tower: square, then octagonal, with round-headed windows and a stone cap
+    const hx = s * 12.5;
+    P.rect(hx - 3.3, 1.2, 6.6, 50, stM, { shadow: 0.7 });
+    P.flat(R.rect(hx + (s > 0 ? 1.9 : -3.3), 1.2, 1.4, 50), ctone(stM, s > 0 ? 0.88 : 1.05));
+    for (const y of [24, 33, 42]) P.win(hx - 0.8, y, 1.6, 4.4, { top: 'arch', col: gl, litP: 0.15 });
+    P.rect(hx - 2.6, 51, 5.2, 6.5, st, { shadow: 0.6 });
+    for (const dx of [-1.4, 0.4]) P.win(hx + dx, 52.4, 1.0, 3.6, { top: 'arch', col: gl, lit: 0 });
+    P.poly(R.spike(hx, 57.5, 5.6, 9.5), stS, { shadow: 0.6 });
+    P.ell(hx, 67.3, 0.5, 0.5, '#c9a64a', { flood: 1 });
+  }
+  P.rect(-9.2, 1.2, 18.4, 33, st, { shadow: 0.8 });
+  // the Giant's Door: round arches stepping in
+  [[10.8, 14.6, stM], [9.2, 13.4, ctone(stM, 0.92)], [7.6, 12.2, ctone(stM, 0.84)], [6.0, 11.0, ctone(stM, 0.76)]].forEach(([w, h, c]) => P.piece(R.arch(-w / 2, 1.2, w, h), c, { shadow: 0.4, edge: 0.6 }));
+  P.win(-2.1, 1.2, 4.2, 6.8, { top: 'arch', col: '#3a2c22', lit: 0.5 });
+  P.poly([[-6.4, 15.8], [6.4, 15.8], [0, 20.5]], stM, { shadow: 0.5 });
+  gwin(-2.7, 20.6, 5.4, 11.4, { litP: 0.6 });
+  for (const dx of [-0.9, 0.9]) P.flat(R.rect(dx - 0.12, 20.6, 0.24, 9.0), st);
+  P.flat(R.ell(0, 29.6, 1.0, 1.0, 16), st); P.flat(R.ell(0, 29.6, 0.6, 0.6, 16), gl);
+  P.rect(-9.8, 33.8, 19.6, 1.0, stM, { shadow: 0.7 });
+  P.poly([[-9.6, 34.8], [9.6, 34.8], [0, 48.5]], st, { shadow: 0.9 });
+  for (let i = -3; i <= 3; i++) P.flat(R.pointed(i * 1.7 - 0.55, 36.2, 1.1, Math.max(1.5, 7.5 - Math.abs(i) * 2.0)), stS);
+  crockets(-9.6, 34.8, 0, 48.5, 9, 0.42); crockets(9.6, 34.8, 0, 48.5, 9, 0.42);
+  P.line([[0, 48.5], [0, 51.5]], 0.3, dk); P.line([[-0.9, 50.4], [0.9, 50.4]], 0.25, dk);
+
+  // Stephansplatz: a fiaker waiting, a lamp, a few people
+  P.on('square');
+  const fx = -8, horse = (x, c) => {
+    P.ell(x, 1.55, 1.15, 0.55, c, { flood: 0, shadow: 0.5 });
+    P.poly([[x + 0.8, 1.7], [x + 1.25, 2.55], [x + 1.75, 2.45], [x + 1.25, 1.55]], c, { flood: 0 });
+    for (const lx of [-0.8, -0.5, 0.6, 0.9]) P.line([[x + lx, 1.2], [x + lx + 0.05, 0]], 0.13, c, { flood: 0, shadow: 0 });
+    P.line([[x - 1.1, 1.7], [x - 1.4, 1.0]], 0.12, c, { flood: 0, shadow: 0 });
+  };
+  horse(fx + 2.6, '#2b2420'); horse(fx + 3.1, '#4a3528');
+  P.rect(fx - 2.4, 0.9, 3.2, 1.6, '#1d1d1f', { flood: 0 });
+  P.rect(fx - 2.6, 2.5, 3.6, 0.25, '#2a2a2c', { flood: 0 });
+  P.poly([[fx - 2.4, 2.75], [fx + 0.8, 2.75], [fx + 0.4, 3.6], [fx - 2.0, 3.6]], '#262628', { flood: 0 });
+  for (const wx of [-1.9, 0.3]) P.piece([R.ell(fx + wx, 0.62, 0.62, 0.62, 18), R.ell(fx + wx, 0.62, 0.48, 0.48, 18)], '#a3332b', { flood: 0, shadow: 0.4 });
+  P.rect(fx + 0.9, 2.2, 0.5, 0.9, '#2a2a2c', { flood: 0 }); P.ell(fx + 1.15, 3.35, 0.2, 0.22, '#e3c3a2', { flood: 0 });
+  P.rect(fx + 0.85, 3.5, 0.6, 0.18, '#151515', { flood: 0 }); P.rect(fx + 0.95, 3.66, 0.4, 0.35, '#151515', { flood: 0 });
+  const person = (x, h, c) => { P.poly([[x - 0.24, 0], [x + 0.24, 0], [x + 0.22, h * 0.55], [x + 0.2, h * 0.82], [x - 0.2, h * 0.82], [x - 0.22, h * 0.55]], c, { flood: 0, shadow: 0.4 }); P.ell(x, h * 0.9, 0.13, 0.15, '#d9b48e', { flood: 0 }); };
+  person(5.5, 1.75, '#7a3b3b'); person(6.2, 1.62, '#2f4b6b'); person(10.8, 1.7, '#5a6b3a'); person(-14.5, 1.8, '#3a3a44');
+  P.line([[13, 0], [13, 4.2]], 0.16, '#2a2622', { flood: 0 }); P.win(12.72, 4.2, 0.56, 0.7, { col: '#e9d6a6', lit: 0.8 }); P.poly([[12.6, 4.9], [13.4, 4.9], [13, 5.4]], '#2a2622', { flood: 0 });
+}
+
+// ---- Budapest: the Parliament at night: the ribbed dome, the spiky wings, the flag in Kossuth Square ----
+function cardParliament(P, r) {
+  const st = '#f3e5c6', stM = '#dfcca6', stS = '#c3ad86', roof = '#843c2e', roofD = '#5c2a22', gl = '#3b2b25', rib = '#e2c18a';
+  const spire = (cx, y, w, h, col = roof) => P.poly(R.spike(cx, y, w, h), col, { shadow: 0.5, edge: 0.7 });
+  const pinn = (cx, y, w, h) => { P.rect(cx - w / 2, y, w, h * 0.38, stM, { shadow: 0.4, edge: 0.6 }); P.poly(R.spike(cx, y + h * 0.38, w * 1.1, h * 0.62), stM, { shadow: 0.4, edge: 0.6 }); };
+  const gwin = (x, y, w, h, o = {}) => P.win(x, y, w, h, { top: 'pointed', col: gl, litP: 0.75, ...o });
+  const facade = (x0, x1, y0, y1, bay, rows) => {
+    for (let x = x0 + bay * 0.5; x < x1 - bay * 0.3; x += bay) {
+      P.flat(R.rect(x - bay * 0.5, y0, bay * 0.12, y1 - y0), stM);
+      rows.forEach(([a, b]) => gwin(x - bay * 0.2, a, bay * 0.4, b - a));
+    }
+  };
+
+  // the dome: a drum of tall windows, the ribbed Gothic dome, the lantern and spire
+  P.on('dome');
+  P.rect(-16.5, 40, 33, 6, stM, { shadow: 0.4 });
+  P.rect(-15, 46, 30, 17, st, { shadow: 0.6 });
+  for (let x = -12.5; x <= 12.6; x += 3.6) { gwin(x - 0.9, 48, 1.8, 11, { litP: 0.9 }); P.flat(R.rect(x + 1.25, 46, 0.5, 17), stM); }
+  const dome = R.sym(0, 63, R.smooth([[15.5, 0], [15.2, 5], [13.4, 11], [9.8, 17], [5.2, 21.5], [2, 23.6], [0, 24.2]], 4));
+  P.piece(dome, roof, { shadow: 0.8 });
+  for (const f of [-0.82, -0.5, -0.18, 0.18, 0.5, 0.82]) {
+    const pts = []; for (let t = 0; t <= 1.0001; t += 0.1) { const yy = 63 + t * 23.6, hw = 15.5 * Math.sqrt(Math.max(0, 1 - t * t)) * (1 - 0.1 * t); pts.push([f * hw, yy]); }
+    P.line(pts, 0.55, rib, { flood: 1 });
+  }
+  for (let x = -14; x <= 14; x += 3.5) pinn(x, 62.4, 0.9, 6.5);
+  P.rect(-2.4, 86.5, 4.8, 4.5, st, { shadow: 0.5 }); gwin(-0.7, 87.2, 1.4, 3.0, { litP: 1 });
+  spire(0, 91, 3.2, 5.6); P.line([[0, 96.4], [0, 98.6]], 0.25, '#e8c46a');
+
+  // the long wings: three floors of pointed windows, steep roofs bristling with pinnacles, pavilions and towers
+  P.on('wings');
+  for (const s of [-1, 1]) {
+    const X = (a, b) => [Math.min(s * a, s * b), Math.abs(b - a)];
+    let [x, w] = X(20, 112);
+    P.rect(x, 0, w, 26, st, { shadow: 0.6 });
+    P.flat(R.rect(x, 0, w, 3.2), stS);
+    facade(s > 0 ? 20 : -112, s > 0 ? 112 : -20, 3.2, 26, 4.6, [[4.4, 10.4], [12.2, 18.4], [20.0, 24.4]]);
+    P.flat(R.rect(x, 18.9, w, 0.5), stS);
+    // roof
+    P.poly([[x, 26], [x + w, 26], [x + w - 3, 37], [x + 3, 37]], roof, { shadow: 0.6 });
+    for (let xx = x + 4; xx < x + w - 3; xx += 5.2) { P.poly([[xx - 1.1, 28], [xx + 1.1, 28], [xx + 1.1, 31], [xx, 33], [xx - 1.1, 31]], st, { shadow: 0.4, edge: 0.6 }); gwin(xx - 0.5, 28.5, 1.0, 2.6, { litP: 0.5 }); }
+    for (let xx = x + 2.6; xx < x + w - 1; xx += 5.2) pinn(xx, 37, 0.8, 7.5);
+    // the inner pavilions with gables and spires
+    [[38, 52], [92, 112]].forEach(([a, b], i) => {
+      const [px, pw] = X(a, b), cx = px + pw / 2;
+      P.rect(px, 0, pw, 31, st, { shadow: 0.8 });
+      facade(px, px + pw, 3.2, 31, 4.6, [[4.4, 11.4], [13.2, 20.4], [22.2, 28.6]]);
+      P.poly([[px - 0.4, 31], [px + pw + 0.4, 31], [cx, 31 + pw * 0.55]], st, { shadow: 0.7 });
+      gwin(cx - 1.4, 32.5, 2.8, 5.2, { litP: 0.8 });
+      pinn(px + 0.5, 31, 1.2, 10); pinn(px + pw - 0.5, 31, 1.2, 10);
+      if (i === 1) { P.poly([[px + 2, 31 + pw * 0.4], [px + pw - 2, 31 + pw * 0.4], [cx, 31 + pw * 1.1]], roof, { shadow: 0.6 }); }
+      spire(cx, 31 + pw * 0.55, 1.4, 9);
+    });
+    // a tall tower at the end of the central block
+    const tx = s * 27.5;
+    P.rect(tx - 3.5, 0, 7, 58, st, { shadow: 0.9 });
+    for (const y of [8, 20, 32, 44]) gwin(tx - 1, y, 2, 6.5, { litP: 0.8 });
+    P.rect(tx - 4.2, 57.5, 8.4, 2.0, stM, { shadow: 0.5 });
+    for (const dx of [-3.6, 3.6]) pinn(tx + dx, 59.5, 1.0, 8);
+    spire(tx, 59.5, 6.2, 17); P.line([[tx, 76.5], [tx, 78.5]], 0.2, '#e8c46a');
+  }
+
+  // the central entrance block: the great gable and its two slender towers
+  P.on('center');
+  P.rect(-20, 0, 40, 36, st, { shadow: 1 });
+  P.flat(R.rect(-20, 0, 40, 3.2), stS);
+  P.piece(R.pointed(-5.5, 0, 11, 15), stM, { shadow: 0.5, edge: 0.6 });
+  P.win(-3.6, 0, 7.2, 12.4, { top: 'pointed', col: '#4a3326', lit: 0.9 });
+  for (const s of [-1, 1]) for (const x of [9, 14]) { gwin(s * x - 1.2, 5, 2.4, 9); gwin(s * x - 1.2, 17, 2.4, 9); gwin(s * x - 1.2, 28.5, 2.4, 5.5); }
+  gwin(-4, 17.5, 8, 14, { litP: 1 });
+  for (const dx of [-1.4, 1.4]) P.flat(R.rect(dx - 0.15, 17.5, 0.3, 11), st);
+  P.poly([[-20.4, 36], [20.4, 36], [0, 54]], st, { shadow: 1 });
+  P.flat(R.pointed(-2.6, 39, 5.2, 9), stS); P.win(-1.6, 40, 3.2, 6.2, { top: 'pointed', col: gl, lit: 1 });
+  for (let i = 1; i < 9; i++) { const t = i / 9; P.flat(R.ell(-20.4 + 20.4 * t, 36 + 18 * t + 0.2, 0.45, 0.35, 8), stM); P.flat(R.ell(20.4 - 20.4 * t, 36 + 18 * t + 0.2, 0.45, 0.35, 8), stM); }
+  spire(0, 54, 1.6, 7);
+  for (const s of [-1, 1]) {
+    const tx = s * 18.2;
+    P.rect(tx - 2.2, 0, 4.4, 48, stM, { shadow: 0.8 });
+    for (const y of [10, 22, 34]) gwin(tx - 0.6, y, 1.2, 5, { litP: 0.7 });
+    pinn(tx, 48, 4.6, 16);
+  }
+
+  // Kossuth Square: the national flag, lamps glowing, dark trees
+  P.on('front');
+  for (const tx of [-36, -27, 27, 37]) P.tree(tx, 0, 6, 10, ['#35503c', '#3e5c44', '#2c4434'], { trunkCol: '#3a2e24' });
+  const fx = 14;
+  P.line([[fx, 0], [fx, 22]], 0.35, '#d6d2c8', { flood: 0.6 });
+  const wave = (y0, y1, c) => { const top = [], bot = []; for (let i = 0; i <= 8; i++) { const t = i / 8, dy = Math.sin(t * 5 + 1) * 0.35 * t; top.push([fx + 0.2 + t * 7.5, y1 + dy]); bot.push([fx + 0.2 + t * 7.5, y0 + dy]); } P.flat([...bot, ...top.reverse()], c, { flood: 0.9 }); };
+  wave(20.2, 21.5, '#c8323a'); wave(18.9, 20.2, '#f4f1ea'); wave(17.6, 18.9, '#3a8a4a');
+  for (const lx of [-20, -8, 4, 22]) {
+    P.line([[lx, 0], [lx, 4.4]], 0.2, '#1e1b18', { flood: 0 });
+    for (const dx of [-0.45, 0.45]) P.win(lx + dx - 0.22, 4.2, 0.44, 0.6, { col: '#f6d78e', lit: 1 });
+    P.flat(R.rect(lx - 0.6, 4.1, 1.2, 0.12), '#1e1b18', { flood: 0 });
+  }
+}
+
+// ---- Warsaw: Castle Square: the Royal Castle and its clock tower, Old Town houses, Sigismund's Column ----
+function cardCastle(P, r) {
+  const brick = '#c8604a', brickM = '#b5543f', trim = '#f1e6cf', roof = '#8c3b2c', roofD = '#6e2e23', cu = '#5f9a83', cuD = '#457a67', gl = '#33312f', gold = '#d8b04a';
+  const winRow = (x0, x1, y, w, h, step, o = {}) => { for (let x = x0; x <= x1 + 0.01; x += step) P.win(x - w / 2, y, w, h, { col: gl, frame: 0.28, frameCol: trim, litP: 0.15, ...o }); };
+
+  // the Old Town houses at the side of the square
+  P.on('houses');
+  const cols = ['#e2a94a', '#9cc7a4', '#e08a6a', '#efd27a', '#8fb0c6', '#d9725a', '#c9b37a'];
+  let x = -84;
+  for (let i = 0; i < 6; i++) {
+    const w = rngRange(r, 5.6, 7.6), h = rngRange(r, 15, 19), c = cols[i % cols.length];
+    P.rect(x, 0, w, h, c, { shadow: 0.6 });
+    const gable = i % 2 === 0;
+    if (gable) P.piece(R.sym(x + w / 2, h, [[w / 2, 0], [w / 2, 1.2], [w * 0.36, 1.8], [w * 0.36, 3.2], [w * 0.2, 3.8], [w * 0.2, 5.2], [0, 5.8]]), c, { shadow: 0.6 });
+    else P.poly([[x - 0.3, h], [x + w + 0.3, h], [x + w / 2, h + 3.6]], roof, { shadow: 0.6 });
+    for (let fy = 4.4; fy < h - 2; fy += 3.3) for (let fx = x + 1.2; fx < x + w - 1.4; fx += 1.9) P.win(fx, fy, 0.9, 1.7, { col: gl, frame: 0.2, frameCol: trim, litP: 0.1 });
+    P.win(x + w / 2 - 0.8, 0, 1.6, 2.8, { top: 'arch', col: '#4a3326', lit: 0 });
+    if (gable) P.win(x + w / 2 - 0.45, h + 1.4, 0.9, 1.6, { top: 'arch', col: gl, lit: 0 });
+    x += w;
+  }
+
+  // the Royal Castle: long terracotta front, the Władysław tower, the clock tower
+  P.on('castle');
+  P.rect(-46, 0, 92, 21, brick, { shadow: 0.6 });
+  P.flat(R.rect(-46, 0, 92, 4.4), brickM);
+  for (const y of [4.4, 11.6, 18.0]) P.flat(R.rect(-46, y, 92, 0.45), trim);
+  winRow(-42, -8, 5.6, 1.5, 3.4, 3.4); winRow(8, 42, 5.6, 1.5, 3.4, 3.4);
+  winRow(-42, -8, 12.6, 1.5, 3.6, 3.4); winRow(8, 42, 12.6, 1.5, 3.6, 3.4);
+  winRow(-42, -8, 18.6, 1.3, 1.6, 3.4, { litP: 0 }); winRow(8, 42, 18.6, 1.3, 1.6, 3.4, { litP: 0 });
+  for (const xx of [-46, 45]) P.flat(R.rect(xx, 0, 1.0, 21), trim);
+  P.poly([[-46.5, 21], [46.5, 21], [44, 28.5], [-44, 28.5]], roof, { shadow: 0.7 });
+  for (let xx = -40; xx <= 40; xx += 6.8) if (Math.abs(xx) > 8) { P.rect(xx - 0.9, 22.2, 1.8, 2.6, roofD, { shadow: 0.3, edge: 0.5 }); P.win(xx - 0.5, 22.6, 1.0, 1.6, { col: gl, lit: 0 }); }
+  // the Władysław tower on the left
+  P.rect(-44, 0, 8, 33, brick, { shadow: 0.8 });
+  P.flat(R.rect(-44, 0, 0.8, 33), trim); P.flat(R.rect(-36.8, 0, 0.8, 33), trim);
+  for (const y of [6, 13, 20, 27]) P.win(-40.7, y, 1.4, 3.0, { col: gl, frame: 0.25, frameCol: trim, litP: 0.15 });
+  P.piece(R.bell(-40, 33, 9, 8), cuD); P.line([[-40, 41], [-40, 43]], 0.18, gold);
+  // the clock tower over the gate
+  const tw = 10.4;
+  P.rect(-tw / 2, 0, tw, 41.5, brick, { shadow: 1 });
+  P.flat(R.rect(-tw / 2, 0, 0.9, 41.5), trim); P.flat(R.rect(tw / 2 - 0.9, 0, 0.9, 41.5), trim);
+  P.piece(R.arch(-2.4, 0, 4.8, 7.2), trim, { shadow: 0.3, edge: 0.5 });
+  P.win(-1.9, 0, 3.8, 6.4, { top: 'arch', col: '#3a2a22', lit: 0.3 });
+  for (const y of [10, 17, 24]) P.win(-1.0, y, 2.0, 4.0, { top: 'arch', col: gl, frame: 0.3, frameCol: trim, litP: 0.2 });
+  P.flat(R.rect(-tw / 2, 30.2, tw, 0.5), trim);
+  P.piece(R.ell(0, 35.4, 2.7, 2.7, 32), trim, { shadow: 0.5 });
+  P.flat(R.ell(0, 35.4, 2.2, 2.2, 32), '#22303a');
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; P.flat(R.rect(Math.cos(a) * 1.8 - 0.08, 35.4 + Math.sin(a) * 1.8 - 0.08, 0.16, 0.16), gold); }
+  P.line([[0, 35.4], [0.9, 36.6]], 0.16, gold); P.line([[0, 35.4], [0, 37.1]], 0.12, gold);
+  P.rect(-tw / 2 - 0.6, 41.2, tw + 1.2, 0.9, trim, { shadow: 0.6 });
+  P.piece(R.bell(0, 42.1, 11.6, 10.5), cu, { flood: 0.6 });
+  P.rect(-1.5, 52.4, 3.0, 3.2, cu, { flood: 0.6 }); P.win(-0.6, 53.0, 1.2, 1.8, { top: 'arch', col: gl, lit: 0 });
+  P.piece(R.onion(0, 55.6, 3.2, 4.0), cu, { flood: 0.6 });
+  P.line([[0, 59.5], [0, 63.2]], 0.24, cuD); P.ell(0, 61.0, 0.42, 0.42, gold, { flood: 1 });
+  P.line([[0, 63.2], [0, 64.4]], 0.18, gold); P.line([[-0.45, 63.9], [0.45, 63.9]], 0.16, gold);
+
+  // Sigismund's Column: stepped base, granite pedestal with eagles, the shaft, the king with cross and sabre
+  P.on('column');
+  const cx = -9, gran = '#b69e95', granD = '#93807a', bronze = '#3d3a32';
+  [[9, 0, 0.55], [7.6, 0.55, 0.55], [6.2, 1.1, 0.55]].forEach(([w, y, h]) => P.rect(cx - w / 2, y, w, h, '#a49c94', { shadow: 0.5 }));
+  P.rect(cx - 2.2, 1.65, 4.4, 4.3, '#c9bfb2', { shadow: 0.8 });
+  P.rect(cx - 1.4, 2.6, 2.8, 2.0, '#2e2c28', { shadow: 0.2, edge: 0.4 });
+  for (const s of [-1, 1]) P.poly([[cx + s * 2.0, 5.95], [cx + s * 3.1, 6.6], [cx + s * 2.3, 6.4], [cx + s * 2.6, 7.0], [cx + s * 1.8, 6.5]], bronze, { flood: 0.3 });
+  P.rect(cx - 1.9, 5.95, 3.8, 0.7, '#d6ccbf', { shadow: 0.6 });
+  P.rect(cx - 0.75, 6.65, 1.5, 12.6, gran, { shadow: 0.9 });
+  P.flat(R.rect(cx + 0.25, 6.65, 0.5, 12.6), granD); P.flat(R.rect(cx - 0.6, 6.65, 0.22, 12.6), ctone(gran, 1.1));
+  P.poly([[cx - 0.75, 19.25], [cx + 0.75, 19.25], [cx + 1.25, 20.4], [cx - 1.25, 20.4]], '#a8904e', { shadow: 0.5 });
+  P.rect(cx - 1.35, 20.4, 2.7, 0.55, '#a8904e', { shadow: 0.5 });
+  // the king: robe, cape, head with crown, the cross held high, the sabre lowered
+  P.poly([[cx - 0.75, 20.95], [cx + 0.75, 20.95], [cx + 0.55, 23.1], [cx + 0.35, 23.6], [cx - 0.35, 23.6], [cx - 0.6, 23.1]], bronze, { shadow: 0.6 });
+  P.poly([[cx - 0.4, 23.5], [cx - 1.1, 21.0], [cx - 0.75, 20.95], [cx - 0.2, 23.0]], '#4a463c', { shadow: 0.4 });
+  P.ell(cx, 23.95, 0.3, 0.34, bronze, { shadow: 0.4 });
+  P.poly([[cx - 0.28, 24.2], [cx + 0.28, 24.2], [cx + 0.3, 24.55], [cx + 0.1, 24.4], [cx, 24.6], [cx - 0.1, 24.4], [cx - 0.3, 24.55]], gold, { flood: 1 });
+  P.line([[cx + 0.35, 23.2], [cx + 0.85, 24.4], [cx + 0.95, 24.9]], 0.2, bronze);
+  P.line([[cx + 0.98, 24.0], [cx + 0.98, 26.6]], 0.13, gold, { flood: 1 }); P.line([[cx + 0.6, 26.0], [cx + 1.36, 26.0]], 0.12, gold, { flood: 1 });
+  P.line([[cx - 0.4, 22.6], [cx - 1.0, 21.6], [cx - 1.4, 20.9]], 0.1, '#c9c2b2');
+  // lamps and two trees on the square
+  for (const lx of [cx - 7, cx + 7, 18]) { P.line([[lx, 0], [lx, 3.8]], 0.16, '#262422', { flood: 0 }); P.win(lx - 0.3, 3.8, 0.6, 0.7, { col: '#efe0b8', lit: 0.8 }); P.poly([[lx - 0.42, 4.5], [lx + 0.42, 4.5], [lx, 5.0]], '#262422', { flood: 0 }); }
+  P.tree(26, 0, 6.5, 11); P.tree(31, 0, 5.5, 9.5);
+}
+
+// ---- Cluj-Napoca: St Michael's Church and its tower, Matthias Corvinus on horseback in Unirii Square ----
+function cardStMichael(P, r) {
+  const st = '#dcc9a3', stM = '#c7b28b', stS = '#a8916d', stL = '#ead9b6', gl = '#3a332e', roof = '#6b4a3c', slate = '#4e4440', bronze = '#3f483e';
+  const gwin = (x, y, w, h, o = {}) => P.win(x, y, w, h, { top: 'pointed', col: gl, litP: 0.5, ...o });
+
+  // the neo-Gothic tower at the west end
+  P.on('tower');
+  const tx = -30;
+  P.rect(tx - 5.5, 0, 11, 45, st, { shadow: 0.6 });
+  for (const s of [-1, 1]) { P.rect(tx + s * 5.5 - 0.9, 0, 1.8, 41, stM, { shadow: 0.5, edge: 0.7 }); for (const y of [12, 24, 36]) P.poly([[tx + s * 5.5 - 1.1, y], [tx + s * 5.5 + 1.1, y], [tx + s * 5.5 + 0.9, y + 1.2], [tx + s * 5.5 - 0.9, y + 1.2]], stL, { shadow: 0.3, edge: 0.5 }); }
+  gwin(tx - 1.1, 8, 2.2, 8); gwin(tx - 1.1, 18, 2.2, 5);
+  P.piece(R.ell(tx, 27, 2.0, 2.0, 28), stL, { shadow: 0.4 }); P.flat(R.ell(tx, 27, 1.6, 1.6, 28), '#24333f');
+  P.line([[tx, 27], [tx + 0.8, 27.9]], 0.14, '#e2c070'); P.line([[tx, 27], [tx, 28.3]], 0.11, '#e2c070');
+  for (const dx of [-1.6, 0.3]) gwin(tx + dx, 32, 1.3, 9.5, { litP: 0.2 });
+  P.rect(tx - 6, 44.6, 12, 1.0, stL, { shadow: 0.6 });
+  P.rect(tx - 4.2, 45.6, 8.4, 9.5, st, { shadow: 0.6 });
+  for (const dx of [-2.2, 0.9]) gwin(tx + dx, 47, 1.3, 6.2, { litP: 0.2 });
+  for (const s of [-1, 1]) { P.rect(tx + s * 4.6 - 0.45, 45.6, 0.9, 7, stM, { shadow: 0.4, edge: 0.6 }); P.poly(R.spike(tx + s * 4.6, 52.6, 1.1, 4.8), stM, { shadow: 0.4, edge: 0.6 }); }
+  P.poly([[tx - 3.8, 55], [tx + 3.8, 55], [tx + 0.25, 80], [tx - 0.25, 80]], slate, { shadow: 0.7, grad: [tx - 3.8, 0, tx + 3.8, 0, 0.12] });
+  for (const y of [58, 63.5]) { const hw = 3.8 * (1 - (y - 55) / 25); P.poly([[tx - 0.7, y], [tx + 0.7, y], [tx, y + 2.2]], '#5f544e', { shadow: 0.3, edge: 0.5 }); P.flat(R.rect(tx - hw, y - 0.2, 2 * hw, 0.25), '#3e3531'); }
+  P.ell(tx, 80.4, 0.4, 0.4, '#d8b04a', { flood: 1 }); P.line([[tx, 80.8], [tx, 83]], 0.16, '#3a3532'); P.line([[tx - 0.6, 82.2], [tx + 0.6, 82.2]], 0.14, '#3a3532');
+
+  // the hall church seen along its south side: buttresses, tall windows, the steep patterned roof, the apse
+  P.on('nave');
+  P.rect(-25, 0, 59, 22.5, st, { shadow: 0.6 });
+  P.flat(R.rect(-25, 0, 59, 1.4), stS);
+  P.poly([[-25.5, 22.4], [34.5, 22.4], [31.5, 42], [-22.5, 42]], roof, { shadow: 0.8 });
+  for (let y = 24, i = 0; y < 41; y += 2.2, i++) for (let x = -22 + (i % 2) * 2; x < 31; x += 4) P.flat([[x, y], [x + 1, y + 1.1], [x, y + 2.2], [x - 1, y + 1.1]], i % 3 === 0 ? '#8a6a4a' : '#5a3e33', { atop: true });
+  for (let x = -21.5; x < 32; x += 7.2) {
+    if (Math.abs(x - 2.3) < 3) continue;
+    gwin(x + 1.9, 5, 2.8, 14.5, { litP: 0.55 });
+    P.flat(R.rect(x + 3.2, 5, 0.18, 12), st); P.flat(R.ell(x + 3.3, 17.4, 0.6, 0.6, 12), st);
+  }
+  for (let x = -24; x < 34; x += 7.2) {
+    P.poly([[x, 0], [x + 1.8, 0], [x + 1.8, 13], [x + 1.4, 16], [x + 1.4, 21], [x + 0.9, 23.5], [x, 23.5]], stL, { shadow: 0.9 });
+    P.flat(R.rect(x + 1.2, 0, 0.6, 13), stM);
+  }
+  // the south portal with its little gable
+  P.piece(R.pointed(0.2, 0, 4.4, 8.2), stM, { shadow: 0.4, edge: 0.6 });
+  P.win(0.9, 0, 3.0, 6.6, { top: 'pointed', col: '#3b2a22', lit: 0.5 });
+  P.poly([[-0.4, 8.2], [5.2, 8.2], [2.4, 12.5]], stL, { shadow: 0.6 });
+  // the apse
+  P.rect(34, 0, 10, 19, stM, { shadow: 0.7 });
+  for (const ax of [35.4, 39.8]) gwin(ax, 4.5, 2.2, 11, { litP: 0.5 });
+  P.poly([[33.4, 19], [44.6, 19], [42.6, 24.5], [39.5, 28.5], [34.4, 30.5]], roof, { shadow: 0.6 });
+  P.flat([[39.5, 28.5], [42.6, 24.5], [44.6, 19], [43.4, 19], [41.6, 24.2], [39.2, 27.6]], '#5a3e33');
+
+  // trees round the square
+  P.on('trees');
+  for (const tx2 of [-38, -31.5, 31.5, 38]) P.tree(tx2, 0, rngRange(r, 6, 8), rngRange(r, 10, 13), ['#5d7a3c', '#6c8a44', '#4f6c34', '#7d9a4c']);
+
+  // Matthias Corvinus: the king on horseback over a stepped plinth, with his commanders around it
+  P.on('statue');
+  P.rect(-6, 0, 12, 0.6, '#9d958a', { shadow: 0.4 });
+  P.rect(-5, 0.6, 10, 0.6, '#aaa297', { shadow: 0.4 });
+  P.rect(-3.4, 1.2, 6.8, 4.4, '#c2b8a8', { shadow: 0.8 });
+  P.flat(R.rect(-3.4, 2.6, 6.8, 1.2), '#4f564a');
+  P.rect(-3.8, 5.6, 7.6, 0.5, '#d2c9b9', { shadow: 0.6 });
+  const hy = 6.1;
+  for (const [lx, a] of [[-1.9, 0.2], [-1.45, -0.15], [1.35, 0.1], [1.8, -0.25]]) P.line([[lx, hy + 1.2], [lx + a, hy + 0.4], [lx + a * 1.3, hy]], 0.24, bronze, { cap: 'round' });
+  P.piece(R.smooth([[-2.4, hy + 1.3], [-2.0, hy + 2.3], [0, hy + 2.45], [2.1, hy + 2.3], [2.5, hy + 1.6], [2.0, hy + 1.05], [0, hy + 0.95], [-2.0, hy + 1.05]], 4, true), bronze, { shadow: 0.6 });
+  P.piece([[-1.9, hy + 2.0], [-2.5, hy + 3.3], [-2.75, hy + 3.9], [-3.45, hy + 3.55], [-3.3, hy + 3.2], [-2.75, hy + 3.15], [-2.4, hy + 2.4], [-1.95, hy + 1.45]], bronze, { shadow: 0.6 });
+  P.poly([[-2.7, hy + 3.85], [-2.55, hy + 4.25], [-2.45, hy + 3.85]], bronze);
+  P.line([[2.45, hy + 2.0], [2.9, hy + 1.3], [2.85, hy + 0.6]], 0.22, bronze, { cap: 'round' });
+  P.poly([[-0.4, hy + 2.3], [0.5, hy + 2.3], [0.45, hy + 3.6], [-0.2, hy + 3.7]], '#4a5446', { shadow: 0.5 });
+  P.ell(0.1, hy + 4.05, 0.3, 0.32, bronze, { shadow: 0.4 });
+  P.poly([[-0.18, hy + 4.3], [0.38, hy + 4.3], [0.4, hy + 4.6], [0.1, hy + 4.48], [-0.2, hy + 4.6]], '#d8b04a', { flood: 1 });
+  P.line([[0.4, hy + 3.2], [1.0, hy + 3.6], [1.25, hy + 4.4]], 0.14, bronze);
+  P.line([[-0.3, hy + 2.8], [0.9, hy + 1.5], [1.1, hy + 1.0]], 0.2, '#4a5446', { cap: 'round' });
+  const fig = (x, flag) => { P.poly([[x - 0.32, 1.2], [x + 0.32, 1.2], [x + 0.28, 3.0], [x - 0.28, 3.0]], bronze, { shadow: 0.5 }); P.ell(x, 3.25, 0.2, 0.22, bronze); if (flag) { P.line([[x + 0.3, 1.4], [x + 0.6, 5.0]], 0.08, bronze); P.poly([[x + 0.6, 5.0], [x + 1.8, 4.7], [x + 1.7, 4.0], [x + 0.55, 4.2]], '#4a5446', { shadow: 0.4 }); } };
+  fig(-4.4, true); fig(4.3, false); fig(-2.2, false);
+}
+
+// ---- Istanbul: Hagia Sophia at sunset: the great dome, the buttresses, four minarets, the park and fountain ----
+function cardHagiaSophia(P, r) {
+  const wall = '#dd9670', wallD = '#c47c58', wallL = '#e8ab84', lead = '#8c95a1', leadD = '#6f7884', gl = '#3c2c28', gold = '#e2b54a';
+  const minaret = (x, h, col, balconies) => {
+    P.rect(x - 1.7, 0, 3.4, 6, ctone(col, 0.92), { shadow: 0.6 });
+    P.rect(x - 1.25, 6, 2.5, h - 6, col, { shadow: 0.8 });
+    P.flat(R.rect(x + 0.45, 6, 0.8, h - 6), ctone(col, 0.86));
+    for (const by of balconies) {
+      P.poly([[x - 1.25, by - 1.0], [x + 1.25, by - 1.0], [x + 2.0, by], [x - 2.0, by]], ctone(col, 0.9), { shadow: 0.5 });
+      P.rect(x - 2.0, by, 4.0, 0.8, ctone(col, 1.05), { shadow: 0.4 });
+      for (let k = -1.7; k <= 1.75; k += 0.42) P.flat(R.rect(x + k - 0.06, by + 0.1, 0.12, 0.6), ctone(col, 0.75));
+    }
+    P.poly([[x - 1.5, h], [x + 1.5, h], [x, h + 9.5]], lead, { shadow: 0.6 });
+    P.line([[x, h + 9.4], [x, h + 11.2]], 0.16, gold, { flood: 1 });
+    P.flat(R.ell(x, h + 10.5, 0.3, 0.3, 12), gold, { flood: 1 });
+  };
+
+  P.on('minBL'); minaret(-33, 50, '#efe6d6', [32, 42]);
+  P.on('minBR'); minaret(33, 48, '#c46a4a', [31, 41]);
+
+  // the dome on its ring of windows, the western half-dome below it
+  P.on('dome');
+  P.rect(-17.5, 39.6, 35, 5.2, wallL, { shadow: 0.5 });
+  for (let x = -16; x <= 16.1; x += 1.6) { P.win(x - 0.38, 40.4, 0.76, 3.2, { top: 'arch', col: gl, litP: 0.7 }); P.flat(R.rect(x + 0.42, 39.6, 0.36, 5.2), wallD); }
+  P.piece(R.dome(0, 44.8, 17.2, 11.2, 36), lead, { shadow: 0.7, grad: [-17, 50, 17, 50, 0.1] });
+  for (const f of [-0.75, -0.45, -0.15, 0.15, 0.45, 0.75]) { const pts = []; for (let t = 0; t <= 1.001; t += 0.1) pts.push([f * 17.2 * Math.cos(t * 1.45), 44.8 + 11.2 * Math.sin(t * 1.45)]); P.line(pts, 0.25, leadD, { shadow: 0 }); }
+  P.rect(-1.0, 55.8, 2.0, 1.0, leadD); P.line([[0, 56.8], [0, 59]], 0.2, gold, { flood: 1 });
+  P.piece([R.ell(0, 59.8, 0.9, 0.9, 20), R.ell(0.35, 60.0, 0.75, 0.8, 20)], gold, { flood: 1, shadow: 0.3 });
+  for (const s of [-1, 1]) P.piece(R.dome(s * 12, 29.5, 6.0, 4.2, 20), lead, { shadow: 0.5 });
+  P.rect(-15, 29.5, 30, 3.8, wall, { shadow: 0.4 });
+  P.piece(R.dome(0, 33.3, 14.5, 7.2, 30), lead, { shadow: 0.6 });
+  for (let x = -8; x <= 8.1; x += 4) P.win(x - 0.6, 33.6, 1.2, 2.2, { top: 'arch', col: gl, litP: 0.6 });
+
+  // the great body: tympanum wall full of windows, leaning buttress towers, lower side wings, the narthex
+  P.on('body');
+  for (const s of [-1, 1]) {
+    const x0 = s > 0 ? 26 : -42;
+    P.rect(x0, 0, 16, 19, wallD, { shadow: 0.6 });
+    for (let xx = x0 + 1.6; xx < x0 + 15; xx += 3.2) { P.win(xx, 4, 1.6, 4.4, { top: 'arch', col: gl, litP: 0.5 }); P.win(xx, 11.2, 1.6, 4.0, { top: 'arch', col: gl, litP: 0.4 }); }
+    P.poly([[x0 - 0.5, 19], [x0 + 16.5, 19], [x0 + 15, 22.5], [x0 + 1, 22.5]], lead, { shadow: 0.5 });
+  }
+  P.rect(-22, 0, 44, 30, wall, { shadow: 0.8 });
+  P.piece(R.arch(-14, 12, 28, 21.5), wallL, { shadow: 0.4, edge: 0.6 });
+  for (let row = 0; row < 3; row++) for (let i = -3; i <= 3; i++) { const yy = 14 + row * 4.4; if (row === 2 && Math.abs(i) > 2) continue; P.win(i * 3.4 - 0.85, yy, 1.7, 3.0, { top: 'arch', col: gl, litP: 0.65 }); }
+  for (const s of [-1, 1]) {
+    // the great buttresses lean in against the dome's thrust, broad at the foot and stepping back
+    P.poly([[s * 16.5, 0], [s * 29, 0], [s * 28, 12], [s * 26.5, 22], [s * 24.5, 34], [s * 19.5, 34], [s * 18.2, 22]], wallD, { shadow: 0.9 });
+    P.flat([[s * 28, 12], [s * 26.5, 22], [s * 24.5, 34], [s * 23.6, 34], [s * 25.4, 22], [s * 26.8, 12], [s * 27.6, 0], [s * 29, 0]], ctone(wallD, 0.84));
+    P.flat(R.rect(Math.min(s * 18.2, s * 26.6), 21.6, 8.4, 0.5), ctone(wallD, 1.12));
+    P.poly([[s * 19.0, 34], [s * 25.0, 34], [s * 24.2, 35.6], [s * 19.8, 35.6]], lead, { shadow: 0.4 });
+    for (const y of [6, 14]) P.win(s * 22.5 - 0.8, y, 1.6, 4.2, { top: 'arch', col: gl, litP: 0.3 });
+  }
+  // the narthex arcade at the front, under a lead roof
+  P.rect(-21, 0, 42, 11, wallL, { shadow: 1 });
+  for (let x = -18.5; x < 19; x += 4.6) P.win(x, 1.0, 2.6, 6.6, { top: 'arch', col: '#5a3a30', litP: 0.6 });
+  P.poly([[-21.6, 11], [21.6, 11], [20, 13.6], [-20, 13.6]], lead, { shadow: 0.6 });
+
+  P.on('minFL'); minaret(-41, 56, '#f2eadc', [30, 41, 50]);
+  P.on('minFR'); minaret(41, 56, '#f2eadc', [30, 41, 50]);
+
+  // Sultanahmet park: the fountain, tulips, cypresses, a simit cart
+  P.on('garden');
+  for (const x of [-30, -26.5, 27, 30.5]) P.piece(R.sym(x, 0, [[0.4, 0], [1.0, 1.4], [1.25, 4.5], [0.85, 8], [0.3, 10.4], [0, 11]]), '#2f4a32', { flood: 0, shadow: 0.7 });
+  const fx = -12;
+  P.ell(fx, 0.9, 7.2, 0.9, '#c9b9a4', { flood: 0.3, shadow: 0.5 });
+  P.rect(fx - 7.2, 0, 14.4, 0.9, '#bcae98', { flood: 0.3, shadow: 0.4 });
+  P.flat(R.ell(fx, 1.0, 6.4, 0.5, 30), '#5d9fbf', { flood: 0.2 });
+  for (const dx of [-4, -2, 0, 2, 4]) { const h = 2.2 + (2 - Math.abs(dx) / 2) * 0.9; P.line([[fx + dx, 1.0], [fx + dx * 0.9, 1.0 + h]], 0.22, '#d6ecf4', { flood: 0.5, cap: 'round', shadow: 0 }); }
+  for (let x = -24; x < 24; x += 0.6) { if (x > fx - 7.6 && x < fx + 7.6) continue; P.flat(R.ell(x, 0.5, 0.24, 0.32, 8), r() < 0.5 ? '#d6343a' : '#f2c23a', { flood: 0.2 }); }
+  P.rect(-24, 0, 48, 0.3, '#4f7a3a', { flood: 0.1, shadow: 0 });
+  const cx = 14;
+  P.rect(cx - 1.4, 0.9, 2.8, 1.4, '#c4302c', { flood: 0.3 });
+  P.win(cx - 1.1, 1.6, 2.2, 0.6, { col: '#f5e6c0', lit: 0.8 });
+  for (let i = 0; i < 4; i++) P.piece([R.ell(cx - 0.9 + i * 0.6, 2.6, 0.3, 0.3, 12), R.ell(cx - 0.9 + i * 0.6, 2.6, 0.13, 0.13, 10)], '#b9772f', { flood: 0.2, shadow: 0.3 });
+  P.line([[cx - 1.2, 2.3], [cx - 1.2, 3.6]], 0.08, '#ddd'); P.line([[cx + 1.2, 2.3], [cx + 1.2, 3.6]], 0.08, '#ddd'); P.rect(cx - 1.5, 3.6, 3.0, 0.25, '#f2f0ea', { flood: 0.3 });
+  for (const wx of [-0.9, 0.9]) P.piece([R.ell(cx + wx, 0.45, 0.45, 0.45, 14), R.ell(cx + wx, 0.45, 0.25, 0.25, 12)], '#2a2a2a', { flood: 0, shadow: 0.3 });
+  for (const lx of [-20, 6, 21]) { P.line([[lx, 0], [lx, 4]], 0.16, '#2a2622', { flood: 0 }); P.win(lx - 0.3, 4, 0.6, 0.7, { col: '#f3d48a', lit: 1 }); P.poly([[lx - 0.4, 4.7], [lx + 0.4, 4.7], [lx, 5.3]], '#2a2622', { flood: 0 }); }
+}
+
+// ---- Ohrid: St John at Kaneo on its cliff over the lake, the wooded hill behind, a fishing boat ----
+function cardKaneo(P, r) {
+  const rock = '#c6b99d', rockM = '#ab9e84', rockD = '#8b7f69', pineC = ['#3d5a35', '#46653b', '#34502f'];
+  const st = '#dcc6a2', brick = '#b8673f', tile = '#b65a3a', tileD = '#93452c', gl = '#3a2e28';
+  const bush = (x, y, s) => { for (let i = 0; i < 3; i++) P.piece(R.ell(x + (r() - 0.5) * s, y + r() * s * 0.4, s * (0.4 + r() * 0.3), s * (0.3 + r() * 0.2), 14), pick(r, pineC), { flood: 0, shadow: 0.5, jitter: 0.06 }); };
+  const pine = (x, y, h) => { P.line([[x, y], [x + 0.2, y + h * 0.7]], 0.3, '#5a4434', { flood: 0 }); for (let i = 0; i < 3; i++) P.piece(R.ell(x + (r() - 0.5) * h * 0.3, y + h * (0.55 + i * 0.16), h * (0.28 - i * 0.06), h * 0.12, 14), pick(r, pineC), { flood: 0, shadow: 0.6 }); };
+
+  // the hill behind, trees along its crest
+  P.on('hill');
+  const crest = R.smooth([[-95, -2], [-80, 14], [-62, 30], [-44, 38], [-22, 36], [0, 31], [22, 25], [42, 16], [60, 6], [74, -2]], 6);
+  P.poly(crest, '#647f48', { flood: 0, shadow: 0 });
+  for (const [x, y] of crest) if (r() < 0.75 && y > 2) bush(x, y - 2.2, 4.2);
+  for (let i = 0; i < 26; i++) { const x = rngRange(r, -85, 60), y = rngRange(r, 2, 20); bush(x, y, 3.2); }
+  for (const [x, y] of [[-48, 22], [-30, 24], [-58, 17]]) { P.rect(x, y, 4.2, 3.2, '#efe6d6', { flood: 0.3, shadow: 0.4 }); P.poly([[x - 0.3, y + 3.2], [x + 4.5, y + 3.2], [x + 2.1, y + 4.6]], tile, { shadow: 0.4 }); P.win(x + 1.6, y + 0.6, 0.8, 1.2, { col: gl, litP: 0.2 }); }
+
+  // the cliff: a crag rising out of the water to a little plateau
+  P.on('cliff');
+  const cliff = [[-36, -5], ...R.smooth([[-34, -1], [-31, 4.5], [-27, 8], [-23, 11.5], [-17, 14.6], [-12, 17.2]], 3), [10, 17.6], ...R.smooth([[12, 17.4], [15.5, 14.5], [18.5, 10.5], [22, 7], [25, 2.5], [28, -1]], 3), [30, -5]];
+  P.poly(cliff, rock, { flood: 0.4, shadow: 0.5 });
+  for (const [x0, y0, x1, y1] of [[-30, 3, -18, 5], [-26, 8, -14, 10.4], [-20, 12, -10, 14.4], [12, 14, 20, 11], [16, 8, 25, 4], [-14, 2, 2, 4.5], [4, 7, 16, 6]]) P.flat([[x0, y0], [x1, y1], [x1, y1 - 0.9], [x0, y0 - 0.6]], rockD, { atop: true, flood: 0.3 });
+  for (const [x0, y0, w, h] of [[-22, -2, 10, 7], [6, -3, 9, 8], [-4, 9, 7, 5]]) P.flat([[x0, y0], [x0 + w, y0 + 1], [x0 + w * 0.8, y0 + h], [x0 + w * 0.15, y0 + h * 0.8]], rockM, { atop: true, flood: 0.3 });
+  for (const [x, y] of [[-29, 6.5], [-24, 10], [-16, 14.5], [15, 12.5], [20, 7.5], [-8, 4], [9, 9]]) bush(x, y, 2.4);
+  pine(-31, 3.5, 7); pine(19.5, 9.5, 6.5); pine(-19, 13, 5.5);
+
+  // the church: brick-and-stone walls, the cross-shaped roofs, the apse, the drum and its cone
+  P.on('church');
+  const by = 17.4, band = (x0, x1, y0, y1) => { for (let y = y0 + 0.6; y < y1; y += 0.85) P.flat(R.rect(x0, y, x1 - x0, 0.22), brick, { atop: true }); };
+  P.rect(-8.5, by, 16, 7.8, st, { shadow: 0.7 }); band(-8.5, 7.5, by, by + 7.8);
+  for (const wx of [-6.6, -1.0, 4.2]) { P.flat(R.arch(wx - 0.25, by + 2.3, 1.9, 3.4), brick); P.win(wx, by + 2.5, 1.4, 2.8, { top: 'arch', col: gl, litP: 0.2 }); }
+  P.poly([[-9, by + 7.8], [-3.6, by + 7.8], [-3.6, by + 9.6]], tile, { shadow: 0.5 }); P.poly([[3.6, by + 7.8], [8, by + 7.8], [3.6, by + 9.6]], tile, { shadow: 0.5 });
+  P.rect(-3.8, by + 7.8, 7.6, 2.0, st, { shadow: 0.4 }); band(-3.8, 3.8, by + 7.8, by + 9.8);
+  P.poly([[-4.4, by + 9.6], [4.4, by + 9.6], [0, by + 12.6]], tile, { shadow: 0.7 });
+  P.flat([[-4.4, by + 9.6], [4.4, by + 9.6], [4.1, by + 9.95], [-4.1, by + 9.95]], tileD);
+  P.rect(7.5, by, 4.2, 6.2, st, { shadow: 0.5 }); band(7.5, 11.7, by, by + 6.2);
+  P.win(8.9, by + 2.0, 1.1, 2.4, { top: 'arch', col: gl, litP: 0.2 });
+  P.poly([[7.2, by + 6.2], [12.2, by + 6.2], [9.4, by + 8.6]], tile, { shadow: 0.5 });
+  P.rect(-2.4, by + 11.4, 4.8, 4.8, st, { shadow: 0.8 }); band(-2.4, 2.4, by + 11.4, by + 16.2);
+  for (const wx of [-1.7, 0.6]) { P.flat(R.arch(wx - 0.15, by + 12.4, 1.3, 2.7), brick); P.win(wx, by + 12.6, 1.0, 2.3, { top: 'arch', col: gl, litP: 0.2 }); }
+  P.poly([[-3.0, by + 16.2], [3.0, by + 16.2], [0, by + 19.4]], tile, { shadow: 0.7 });
+  P.line([[0, by + 19.3], [0, by + 21.0]], 0.14, '#2c2826'); P.line([[-0.5, by + 20.4], [0.5, by + 20.4]], 0.12, '#2c2826');
+
+  // the waterline: rocks, and a fishing boat
+  P.on('front');
+  for (const [x, w, h] of [[-36, 6, 1.6], [-29, 4, 1.1], [24, 5, 1.3]]) P.poly([[x, -0.4], [x + w, -0.4], [x + w * 0.8, h], [x + w * 0.3, h * 1.1]], rockM, { flood: 0.3, shadow: 0.5 });
+  const bx = 9;
+  P.poly([[bx - 3.4, 0.9], [bx + 3.6, 0.9], [bx + 2.8, -0.2], [bx - 2.6, -0.2]], '#f2efe6', { flood: 0.3, shadow: 0.6 });
+  P.flat(R.rect(bx - 3.2, 0.35, 6.6, 0.25), '#2f63a3', { flood: 0.3 });
+  P.line([[bx - 3.4, 0.9], [bx - 3.9, 1.5]], 0.16, '#f2efe6', { flood: 0.3 });
+  P.rect(bx - 0.6, 0.9, 1.4, 0.8, '#d9cbb0', { flood: 0.2 });
+  P.poly([[bx + 1.4, 0.9], [bx + 1.7, 0.9], [bx + 1.6, 2.3]], '#c84f3a', { flood: 0.2 });
+}
+
+// Each landmark: its layers (metres; z = how far back it stands), where it stands (s along the street from
+// the landmark spot, x to the side, y up, k scale), how strongly it is floodlit at dusk, and its painting.
+const LANDMARK_CARDS = {
+  brandenburg: {
+    seed: 9, ppm: 22, place: { s: 0, x: 0, k: 1.6 }, flood: 0.8, draw: cardBrandenburg,
+    layers: {
+      trees: { z: 42, x0: -52, x1: 52, y0: 0, y1: 24, flood: 0 },
+      back: { z: 10, x0: -16.2, x1: 16.2, y0: 0, y1: 15.4, flood: 0.4 },
+      wings: { z: 3, x0: -34.6, x1: 34.6, y0: 0, y1: 12.4 },
+      gate: { z: 0, x0: -20.4, x1: 20.4, y0: 0, y1: 22.7 },
+      quadriga: { z: -0.8, x0: -3.4, x1: 3.4, y0: 22.4, y1: 31.9, flood: 0.8 },
+    },
+  },
+  eiffel: {
+    seed: 3, ppm: 22, place: { s: 60, x: 0 }, flood: 1, draw: cardEiffel,
+    layers: {
+      gardens: { z: 10, x0: -100, x1: 100, y0: 0, y1: 22, flood: 0.15 },
+      tower: { z: 0, x0: -64, x1: 64, y0: 0, y1: 326, flood: 1 },
+      frontL: { z: -40, x0: -58, x1: -17, y0: 0, y1: 16, flood: 0.3 },
+      frontR: { z: -40, x0: 17, x1: 58, y0: 0, y1: 16, flood: 0.3 },
+    },
+  },
+  colosseum: {
+    seed: 5, ppm: 22, place: { s: 0, x: -12 }, flood: 0.4, draw: cardColosseum,
+    layers: {
+      cavea: { z: 42, x0: -6, x1: 92, y0: 0, y1: 40 },
+      inner: { z: 7, x0: 8, x1: 92, y0: 0, y1: 34 },
+      outer: { z: 0, x0: -92, x1: 33, y0: 0, y1: 48.7 },
+      pines: { z: -26, x0: -37, x1: 36, y0: 0, y1: 21 },
+      arco: { z: -26, x0: -20, x1: 8, y0: 0, y1: 21.2 },
+    },
+  },
+  stephansdom: {
+    seed: 11, ppm: 22, place: { s: 10, x: -14 }, flood: 0.5, draw: cardStephansdom,
+    layers: {
+      south: { z: 34, x0: 19, x1: 33, y0: 0, y1: 137.5 },
+      north: { z: 30, x0: -33, x1: -19, y0: 0, y1: 82 },
+      roof: { z: 16, x0: -23, x1: 23, y0: 28, y1: 64 },
+      front: { z: 0, x0: -22, x1: 22, y0: 0, y1: 68 },
+      square: { z: -30, x0: -16, x1: 15, y0: 0, y1: 5.6, flood: 0 },
+    },
+  },
+  parliament: {
+    seed: 13, ppm: 22, place: { s: 10, x: 0, k: 1.15 }, flood: 1, draw: cardParliament,
+    layers: {
+      dome: { z: 22, x0: -17, x1: 17, y0: 40, y1: 99 },
+      wings: { z: 8, x0: -112.5, x1: 112.5, y0: 0, y1: 80 },
+      center: { z: 0, x0: -21, x1: 21, y0: 0, y1: 64.5 },
+      front: { z: -36, x0: -40, x1: 40, y0: 0, y1: 23, flood: 0.3 },
+    },
+  },
+  castle: {
+    seed: 17, ppm: 22, place: { s: 0, x: 4, k: 1.1 }, flood: 0.5, draw: cardCastle,
+    layers: {
+      houses: { z: 10, x0: -85, x1: -44, y0: 0, y1: 26 },
+      castle: { z: 0, x0: -47, x1: 47, y0: 0, y1: 64.8 },
+      column: { z: -16, x0: -18, x1: 35, y0: 0, y1: 27 },
+    },
+  },
+  stmichael: {
+    seed: 19, ppm: 22, place: { s: 0, x: 6, k: 1.1 }, flood: 0.6, draw: cardStMichael,
+    layers: {
+      tower: { z: 18, x0: -36.5, x1: -23.5, y0: 0, y1: 83.4 },
+      nave: { z: 6, x0: -26, x1: 45, y0: 0, y1: 43 },
+      trees: { z: -8, x0: -43, x1: 43, y0: 0, y1: 14, flood: 0 },
+      statue: { z: -24, x0: -6.5, x1: 6.5, y0: 0, y1: 11, flood: 0.5 },
+    },
+  },
+  hagiasophia: {
+    seed: 23, ppm: 22, place: { s: 10, x: 0, k: 1.3 }, flood: 0.7, draw: cardHagiaSophia,
+    layers: {
+      minBL: { z: 30, x0: -35.5, x1: -30.5, y0: 0, y1: 61.5 },
+      minBR: { z: 30, x0: 30.5, x1: 35.5, y0: 0, y1: 59.5 },
+      dome: { z: 14, x0: -18, x1: 18, y0: 28, y1: 61 },
+      body: { z: 0, x0: -42.6, x1: 42.6, y0: 0, y1: 41 },
+      minFL: { z: -8, x0: -43.5, x1: -38.5, y0: 0, y1: 67.5 },
+      minFR: { z: -8, x0: 38.5, x1: 43.5, y0: 0, y1: 67.5 },
+      garden: { z: -34, x0: -32, x1: 32, y0: 0, y1: 11.5, flood: 0.2 },
+    },
+  },
+  kaneo: {
+    seed: 29, ppm: 22, place: { s: 30, x: 4, k: 1.35, y: -1.5 }, flood: 0.3, draw: cardKaneo,
+    layers: {
+      hill: { z: 60, x0: -95, x1: 74, y0: -2, y1: 44, flood: 0.1 },
+      cliff: { z: 6, x0: -36.5, x1: 30.5, y0: -5, y1: 20 },
+      church: { z: 2, x0: -9.4, x1: 12.6, y0: 17.2, y1: 38.6 },
+      front: { z: -14, x0: -36.5, x1: 29.5, y0: -0.6, y1: 2.6 },
+    },
+  },
+};
 
 /* =====================================================================
    Birds: a flock lifts off as each new street opens; a few always circle over the landmark
    ===================================================================== */
-const BIRDS = { roma: 'swallow', paris: 'pigeon', wien: 'pigeon', budapest: 'pigeon', warszawa: 'pigeon', cluj: 'swallow', istanbul: 'gull', ohrid: 'gull' };
+const BIRDS = { roma: 'swallow', paris: 'pigeon', wien: 'pigeon', budapest: 'pigeon', warszawa: 'pigeon', cluj: 'swallow', istanbul: 'gull', ohrid: 'gull', berlin: 'pigeon' };
 const BIRD_LOOK = { pigeon: { col: '#5d6168', size: 0.34, flap: 11 }, gull: { col: '#ece9e2', size: 0.55, flap: 6.5 }, swallow: { col: '#202228', size: 0.22, flap: 15 } };
 function makeBirds(scene) {
   const N = 64;
@@ -2809,7 +3774,27 @@ async function main() {
         a.tex = [tc, td];
         a.mats = { facade: makeFacadeMat(a.city, tc, td), roof: makeRoofMat(a.city), ground: makeGroundMat(a.city) };
         a.out = null;
-        yield; renderer.initTexture(tc); yield; renderer.initTexture(td); yield;
+        yield 'frame'; renderer.initTexture(tc); yield 'frame'; renderer.initTexture(td); yield 'frame';
+      } else yield;
+    }
+  }
+  // the landmark of each city: painted as paper cards in slices, then uploaded a texture per slice
+  const cards = new Map();
+  function cardFor(city) {
+    const id = CITIES[city].landmark;
+    if (!LANDMARK_CARDS[id]) return null;
+    let c = cards.get(city);
+    if (!c) { c = { city, id, done: false }; c.gen = paintCardGen(id, activeQ, c); cards.set(city, c); }
+    return c;
+  }
+  function* cardStep(c) {
+    if (!c) return;
+    while (!c.done) {
+      if (c.gen.next().done) {
+        c.done = true;
+        yield* cardUpload(renderer, c);
+        cardPoolRelease(c); // (the canvases are copied by now)
+        c.mat = makeCardMat(c.tex[0], c.tex[1], LANDMARK_CARDS[c.id].flood ?? 0.5);
       } else yield;
     }
   }
@@ -2818,16 +3803,27 @@ async function main() {
     if (app.itin) { const k = lastCS ? lastCS.k : 0; for (const kk of [k + 1, k + 2]) if (app.itin.segs[kk]) keep.add(app.itin.segs[kk].city); }
     for (const [city, a] of atlases) {
       if (keep.has(city)) continue;
+      if (PAINT_POOL.owner === a.out) PAINT_POOL.owner = null;
       if (a.tex) a.tex.forEach((t) => t.dispose());
       if (a.mats) Object.values(a.mats).forEach((m) => m.dispose());
       atlases.delete(city);
     }
+    for (const [city, c] of cards) {
+      if (keep.has(city)) continue;
+      cardPoolRelease(c);
+      cardDispose(renderer, c);
+      if (c.mat) c.mat.dispose();
+      cards.delete(city);
+    }
   }
   function* streetJob(st) {
     const a = atlasFor(st.g.city);
-    yield* atlasStep(a);
+    st.phase = 'atlas'; yield* atlasStep(a);
     st.atlas = a;
-    yield* buildStreetGen(st.g, st.out, a);
+    const c = cardFor(st.g.city);
+    st.phase = 'card'; yield* cardStep(c);
+    st.card = c;
+    st.phase = 'street'; yield* buildStreetGen(st.g, st.out, a);
   }
 
   // ---------- post: HDR scene -> bloom -> filmic tone map -> grade ----------
@@ -2936,7 +3932,6 @@ async function main() {
     resize();
   }
   applyQuality();
-  LM_A2C = QUALITY[activeQ].msaa && msaaOK;
   addEventListener('resize', resize);
 
   // ---------- app state ----------
@@ -2976,63 +3971,86 @@ async function main() {
   function requestStreet(k) {
     if (!app.itin || k < 0 || k >= app.itin.segs.length) return null;
     let st = streets.get(k); if (st) return st;
-    st = { k, g: app.itin.segs[k], out: {}, ready: false, group: new THREE.Group(), meshes: [] };
+    st = { k, g: app.itin.segs[k], out: {}, ready: false, group: new THREE.Group(), far: new THREE.Group(), meshes: [] };
     st.gen = streetJob(st);
     streets.set(k, st); jobs.push(st);
     return st;
   }
   function finishStreet(st) {
     if (!st || st.ready) return;
-    while (!st.gen.next().done) { /* run it to the end */ }
+    CARD_SYNC++; // (a landmark waiting on an off-thread copy finishes the direct way instead)
+    try { while (!st.gen.next().done) { /* run it to the end */ } } finally { CARD_SYNC--; }
     const i = jobs.indexOf(st); if (i >= 0) jobs.splice(i, 1);
     streetBuilt(st);
   }
+  // Run building work for up to ms this frame. A step that yields 'frame' (a big upload) ends the frame's work,
+  // so uploads never pile up. Spare time goes to drawing a finished, still hidden street's meshes once, one per
+  // frame, so their buffers are on the GPU before the street is shown.
   function runJobs(ms) {
     const t0 = performance.now();
     while (jobs.length && performance.now() - t0 < ms) {
-      const st = jobs[0];
-      if (st.gen.next().done) { jobs.shift(); streetBuilt(st); return; }
+      const st = jobs[0], r = st.gen.next();
+      if (r.done) { jobs.shift(); streetBuilt(st); return; }
+      if (r.value === 'frame') return;
     }
     if (performance.now() - t0 < ms) for (const st of streets.values()) if (st.ready && !st.warm && !st.group.visible) { warmUp(st); break; }
   }
   const warmRT = new THREE.WebGLRenderTarget(1, 1);
+  // draw one group alone, off-screen (shaders and buffers get ready without anything showing)
+  function warmGroup(grp) {
+    const was = [...streets.values()].map((o) => [o, o.group.visible, o.far.visible]);
+    for (const [o] of was) { o.group.visible = false; o.far.visible = false; }
+    const gv = grp.visible; grp.visible = true;
+    const au = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(warmRT); renderer.render(scene, camera); renderer.setRenderTarget(null);
+    renderer.shadowMap.autoUpdate = au; grp.visible = gv;
+    for (const [o, a, b] of was) { o.group.visible = a; o.far.visible = b; }
+  }
   function warmUp(st) {
-    st.warm = true;
-    const others = [...streets.values()].filter((o) => o !== st && o.group.visible);
-    others.forEach((o) => { o.group.visible = false; });
-    st.group.visible = true; const lmVis = st.landmark && st.landmark.visible; if (st.landmark) st.landmark.visible = true;
+    const list = st.warmList || (st.warmList = [...st.group.children, ...st.far.children]);
+    const obj = list.shift();
+    if (!list.length) st.warm = true;
+    if (!obj) return;
+    const was = [...streets.values()].map((o) => [o, o.group.visible, o.far.visible]);
+    for (const [o] of was) { o.group.visible = o === st; o.far.visible = o === st; }
+    const vis = list.concat(st.group.children, st.far.children).map((c) => [c, c.visible]);
+    for (const c of [...st.group.children, ...st.far.children]) c.visible = c === obj;
     const au = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
     renderer.setRenderTarget(warmRT); renderer.render(scene, camera); renderer.setRenderTarget(null);
     renderer.shadowMap.autoUpdate = au;
-    st.group.visible = false; if (st.landmark) st.landmark.visible = lmVis;
-    others.forEach((o) => { o.group.visible = true; });
+    for (const [c, v] of vis) c.visible = v;
+    for (const [o, a, b] of was) { o.group.visible = a; o.far.visible = b; }
   }
   function streetBuilt(st) {
     st.ready = true;
     const mats = { ...st.atlas.mats, trim: SM.trim, cloth: SM.cloth, iron: SM.iron, glow: SM.glow, water: SM.water };
-    for (const key of ['facade', 'roof', 'ground', 'trim', 'cloth', 'iron', 'glow', 'water']) {
-      if (!st.out[key]) continue;
-      const m = new THREE.Mesh(st.out[key], mats[key]);
-      m.castShadow = key !== 'ground' && key !== 'glow' && key !== 'water'; m.receiveShadow = key !== 'glow';
-      m.frustumCulled = false; // one mesh spans the whole street
-      st.group.add(m); st.meshes.push(m);
+    for (const [part, grp] of [[st.out.near, st.group], [st.out.far, st.far]]) {
+      for (const key of ['facade', 'roof', 'ground', 'trim', 'cloth', 'iron', 'glow', 'water']) {
+        if (!part[key]) continue;
+        const m = new THREE.Mesh(part[key], mats[key]);
+        m.castShadow = key !== 'ground' && key !== 'glow' && key !== 'water'; m.receiveShadow = key !== 'glow';
+        m.frustumCulled = false; // one mesh spans the whole street
+        grp.add(m); st.meshes.push(m);
+      }
+      if (part.bulbs) { const pts = new THREE.Points(part.bulbs, SM.bulbs); pts.frustumCulled = false; grp.add(pts); }
+      if (part.wires) { const ln = new THREE.LineSegments(part.wires, wireMat); ln.frustumCulled = false; grp.add(ln); }
     }
-    if (st.out.bulbs) { const pts = new THREE.Points(st.out.bulbs, SM.bulbs); pts.frustumCulled = false; st.group.add(pts); }
-    if (st.out.wires) { const ln = new THREE.LineSegments(st.out.wires, wireMat); ln.frustumCulled = false; st.group.add(ln); }
     st.lights = st.out.lights || [];
-    const lm = buildLandmark(st.g); if (lm) { st.group.add(lm); st.landmark = lm; }
-    st.group.visible = false; // updateWorld decides when it shows
-    scene.add(st.group);
+    const lm = buildLandmark(st.g, st.card); if (lm) { st.far.add(lm); st.landmark = lm; }
+    st.group.visible = false; st.far.visible = false; // updateWorld decides when they show
+    scene.add(st.group, st.far);
   }
   function disposeStreet(st) {
     const i = jobs.indexOf(st); if (i >= 0) jobs.splice(i, 1);
-    scene.remove(st.group);
-    st.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    scene.remove(st.group, st.far);
+    for (const grp of [st.group, st.far]) grp.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     streets.delete(st.k);
     pruneAtlases();
   }
   // Streets alive at once: the one behind you (for a few seconds), yours, the next (its corner opens off yours),
-  // and the one after that, built quietly in slices and only shown once the turn toward it begins.
+  // and the one after that, built quietly in slices. A street's near part (up to and around its next corner) shows
+  // from the turn two streets before it; its far part (the long view, the square, the landmark) only from the turn
+  // into it until you turn out of it, because streets a corner or two apart cross each other out there.
   function updateWorld(t, cs) {
     const k = cs.k, S = app.itin.segs, turning = cs.phase !== 'walk';
     const keepPrev = k > 0 && t < S[k].startT + 4;
@@ -3043,9 +4061,10 @@ async function main() {
     if (k === 0 || app.mode !== 'walk' || t > S[k].startT + 0.8) requestStreet(k + 2); // not during the arrival itself
     if (turning) finishStreet(streets.get(k + 2));
     for (const st of streets.values()) {
-      const vis = st.ready && (st.k <= k + 1 || (st.k === k + 2 && turning));
-      if (st.group.visible !== vis) st.group.visible = vis;
-      if (st.landmark) st.landmark.visible = st.k <= k || (st.k === k + 1 && turning);
+      const near = st.ready && (st.k <= k + 1 || (st.k === k + 2 && turning));
+      const far = st.ready && (st.k === k || (st.k === k + 1 && turning));
+      if (st.group.visible !== near) st.group.visible = near;
+      if (st.far.visible !== far) st.far.visible = far;
     }
   }
 
@@ -3487,12 +4506,13 @@ async function main() {
     const warm = new THREE.Group(), q = new THREE.PlaneGeometry(0.01, 0.01);
     const add = (m) => { const mesh = new THREE.Mesh(q, m); mesh.position.set(camera.position.x, camera.position.y, camera.position.z - 2); mesh.frustumCulled = false; warm.add(mesh); };
     for (const city of CITY_IDS) { add(makeRoofMat(city)); add(makeGroundMat(city)); }
-    for (const m of [SM.water, SM.iron, SM.cloth, SM.trim, SM.glow, makeLandmarkMat(false, 1), makeLandmarkMat(true, 1)]) add(m);
+    const [dt0, dt1] = cardTexturesDummy();
+    for (const m of [SM.water, SM.iron, SM.cloth, SM.trim, SM.glow, makeCardMat(dt0, dt1, 1)]) add(m);
     scene.add(warm);
     // compile the variants used when drawing into the HDR buffer (an off-screen target), not the ones for the canvas
     renderer.setRenderTarget(warmRT);
     try { if (renderer.compileAsync) await renderer.compileAsync(scene, camera); else renderer.compile(scene, camera); } catch { /* compile lazily */ }
-    renderer.setRenderTarget(warmRT); post.render(true); warmUp({ group: warm, landmark: null }); renderer.setRenderTarget(null);
+    renderer.setRenderTarget(warmRT); post.render(true); warmGroup(warm); renderer.setRenderTarget(null);
     scene.remove(warm); // the programs stay cached for the real materials
   }
   requestAnimationFrame(frame);
@@ -3501,23 +4521,47 @@ async function main() {
   if (!params.has('still')) begin();
 
   window.__eu = {
-    app, audio, settings, camera, renderer, scene, streets, post, camState, segAt, CITIES, LK, LIGHT, LCACHE, U, sun, hemi,
+    app, audio, settings, camera, renderer, scene, streets, post, camState, segAt, CITIES, LK, LIGHT, LCACHE, U, sun, hemi, layoutStreet, THREE,
     setTime(t) { app.forcedTime = t; if (app.mode === 'intro') app.mode = 'walk'; },
     exportAnalysis() { return packAnalysis(app.analysis); },
     end() { endTrip(); },
     newTrip(s) { setupTrip(app.analysis, s ?? ((Math.random() * 2 ** 31) >>> 0)); prebuild(); app.lastK = -1; },
     // time every slice of building street k (and its city's atlas) without showing it
     profileBuild(k) {
-      const g = app.itin.segs[k], st = { k, g, out: {}, group: new THREE.Group(), meshes: [] }, steps = [];
-      atlases.delete(g.city);
+      const g = app.itin.segs[k], st = { k, g, out: {}, group: new THREE.Group(), far: new THREE.Group(), meshes: [] }, steps = [];
+      atlases.delete(g.city); cards.delete(g.city);
       const gen = streetJob(st); let t = performance.now();
-      while (true) { const r = gen.next(); const n = performance.now(); steps.push(n - t); t = n; if (r.done) break; }
+      const ph = [];
+      const gl = renderer.getContext(); CARD_SYNC++;
+      while (true) { gl.finish(); t = performance.now(); const r = gen.next(); const n = performance.now(); steps.push(n - t); ph.push(st.phase); if (r.done) break; }
+      CARD_SYNC--;
       const t1 = performance.now(); streetBuilt(st); const tb = performance.now() - t1; disposeStreet(st);
-      const idx = steps.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 4).map(([v, i]) => `#${i}:${v.toFixed(1)}`);
+      const idx = steps.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 4).map(([v, i]) => `#${i}${ph[i]}:${v.toFixed(1)}`);
       return { city: g.city, steps: steps.length, total: steps.reduce((a, b) => a + b, 0).toFixed(0), worst: idx, meshes: tb.toFixed(1) };
     },
     pause(v) { app.paused = v; },
+    profileCard(city) {
+      cards.delete(city); const c = cardFor(city), gen = cardStep(c), steps = []; let t = performance.now(); CARD_SYNC++;
+      for (;;) { const r = gen.next(), n = performance.now(); steps.push(+(n - t).toFixed(1)); t = n; if (r.done) break; }
+      CARD_SYNC--;
+      return { last: steps.slice(-6), n: steps.length, max: Math.max(...steps), at: steps.indexOf(Math.max(...steps)) };
+    },
+    // dev: paint a city's landmark cards right now and save the atlas (and its light mask) as images
+    async cardDump(city, q = 'high') {
+      const id = CITIES[city].landmark, out = {}, t0 = performance.now(); let n = 0, worst = 0, tl = performance.now();
+      for (const _ of paintCardGen(id, q, out)) { const t = performance.now(); worst = Math.max(worst, t - tl); tl = t; n++; }
+      cardPoolRelease(out);
+      const ms = performance.now() - t0;
+      const save = (cv, name) => new Promise((res) => cv.toBlob((b) => fetch('/__shot?name=' + name, { method: 'POST', body: b }).then(() => res(name)), 'image/png'));
+      await save(out.canvas, `card_${city}.png`); await save(out.mask, `card_${city}_mask.png`);
+      return { W: out.W, H: out.H, ppm: out.ppm.toFixed(1), slices: n, worstSlice: worst.toFixed(1), totalMs: ms.toFixed(0), ops: out.nOps, slow: out.slow.join(' ') };
+    },
     renderOnce(nowMs) { const a = performance.now(); step(nowMs ?? performance.now()); renderer.getContext().finish(); return performance.now() - a; },
+    // dev only: render a frame and save it through the local dev server (POST /__shot)
+    shot(name, frames = 3) {
+      for (let i = 0; i < frames; i++) this.renderOnce();
+      return new Promise((res) => renderer.domElement.toBlob((b) => fetch('/__shot?name=' + encodeURIComponent(name), { method: 'POST', body: b }).then(() => res(name), (e) => res('failed: ' + e)), 'image/jpeg', 0.88));
+    },
     programs() { return renderer.info.programs.map((p) => p.name + '|' + p.cacheKey.split(',').slice(0, 3).join(',')); },
     info() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, pr: curPR, q: activeQ, streets: [...streets.keys()], jobs: jobs.length }; },
   };

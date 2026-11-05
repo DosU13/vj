@@ -17,7 +17,7 @@
 | About 32 beats, then a 90° turn left or right at random | Turns are timed from the song's beats and land on the first beat of a musical phrase. Left or right is a coin flip |
 | Each turn switches city | The street around the corner is built in the next city's style while you walk. Sky, light and colour cross-fade during the turn |
 | A long street with the main building in front | Each street points straight at its landmark 200–300 m away, so it is in view the whole time |
-| 8 or 16 cities, including yours | Version 1 = your 7 + Paris = 8. Version 2 adds 8 more (§4) |
+| 8 or 16 cities, including yours | Your 7 + Paris + Berlin = 9, so one play visits each city exactly once. More can be added later (§4) |
 | The vibe of each city, with details | Per-city houses, light, props and one "signature" beat effect (§3) |
 
 ## 2. The trip at a glance
@@ -36,9 +36,9 @@
 
 Left turns are the mirror image. The houses on the corner you walk around are "two-faced": painted as city A on the side facing street A, and as city B on the side facing street B.
 
-One play of the song (3:15) is about **9 streets**: the first city plus 8 turns. With 8 cities in shuffled order, one play visits every city once, plus one more.
+One play of the song (3:15) is about **9 streets**: the first city plus 8 turns. With 9 cities in shuffled order, one play visits every city exactly once.
 
-## 3. The 8 cities
+## 3. The 9 cities
 
 | # | Stamp | Landmark at the end of the street | The street | Light |
 |---|---|---|---|---|
@@ -50,6 +50,7 @@ One play of the song (3:15) is about **9 streets**: the first city plus 8 turns.
 | 6 | İstanbul · Türkiye | Hagia Sophia: great dome, four minarets | Steep lane of colourful Balat-style houses | Sunset pink → lantern glow |
 | 7 | Охрид · Северна Македонија | Church of St. John at Kaneo on its cliff above the lake | Old-town lane stepping down to the water | Soft morning, lake haze |
 | 8 | Paris · France | Eiffel Tower | Haussmann street (like Rue Saint-Dominique) | Dusk, tower lit gold |
+| 9 | Berlin · Deutschland | Brandenburg Gate with the Quadriga, the Tiergarten behind | Gründerzeit boulevard under linden trees (like Unter den Linden) | Fresh summer morning |
 
 You thought Ohrid might have no main building, but St. John at Kaneo is *the* Ohrid view, so it's in. Ohrid is also the only street that ends at water instead of a square.
 
@@ -94,6 +95,11 @@ You thought Ohrid might have no main building, but St. John at Kaneo is *the* Oh
 - Houses: cream limestone Haussmann blocks, wrought-iron balconies on the 2nd and 5th floors, zinc mansard roofs with dormers and chimney pots.
 - Details: café terraces with red awnings and bistro chairs, a Morris column, a Wallace fountain.
 - On the beat: café lights pulse; the tower does its famous white *sparkle* on the biggest drop.
+
+**Berlin**
+- Houses: tall Gründerzeit apartment blocks in sand, sage, salmon and grey-teal; tall windows in stucco surrounds, a stack of small iron balconies up the middle of each house, shops and a carriage gate below.
+- Details: linden trees along both kerbs, round poster columns (Litfaßsäulen), bicycles against the walls, gas lanterns, German shop signs (Späti, Bäckerei, Kneipe, Imbiss…).
+- The landmark: the Brandenburg Gate with its six columns and the Quadriga on top. Through the passages you see the Tiergarten, and a small golden Victory Column far down the axis.
 
 ## 4. Version 2: 16 cities (optional)
 
@@ -203,7 +209,15 @@ These times come from analysing the mp3. The exact beats get checked in M1 with 
 
 **Props:** lamps in each city's own design, café furniture, umbrellas, string lights, laundry, plants and trees, vehicles (Vespa, tram, carriage), fountains and statues, flocks of birds (pigeons, gulls, swallows).
 
-**Landmarks:** one builder per city, made from simple shapes: turned profiles, extrusions, arches cut out with textures, repeated parts. They're seen from 200+ m away, so the **silhouette** has to be right first and detail comes second. Each gets its own lighting: sunlit, or floodlit at dusk.
+**Landmarks: paper cut-outs.** Each landmark is painted in code as a few layers of coloured card, like a pop-up book. Every piece gets a darker cut edge, a soft shadow on the card behind it, and a light catch along its top edge, plus paper grain in the shader. The layers stand a few metres apart at the end of the street (for example the Brandenburg Gate: Tiergarten trees, the back colonnade, the guardhouses, the gate, the Quadriga). So they shift against each other as you walk, and you see real depth through the openings. They're seen from 200+ m away, so the **silhouette** comes first and detail second.
+- A light mask painted alongside the colours lets windows glow and the stone take floodlight in the evening cities. Paler stone takes the light more gently than dark iron, so it stays golden instead of burning white. The Eiffel Tower's lattice also carries its sparkle.
+- Each landmark is painted into one texture sheet (layers packed together), a few pieces per frame, then uploaded a strip per frame. Its canvases are reused city after city, so no big allocations cause garbage-collection pauses.
+- Landmarks thin out the haze a little (62% of the street's fog), because they are the point of each view.
+
+**Blocks and streaming.** You only walk ~25 m between corners, so the street you came from and the one after next run side by side, one block apart.
+- **Block depth:** the rows of houses backing onto that block share its depth, so houses never overlap. Before this, two house fronts landing on the same wall flickered against each other.
+- **Near and far parts:** each street is built as a near part (up to and around its next corner) and a far part (the rest of the long street, the square, the landmark). The near part shows from the turn two streets before; the far part only from the turn into the street until you turn out of it, because streets a corner or two apart cross each other out there.
+- **Ohrid's lake:** it starts beyond the neighbouring city's square, so nothing stands in the water during a turn.
 
 **Sky and air:** each city has its own sky (gradient, sun, clouds) and a distant skyline of rooftops and domes behind the landmark. Height fog glows warmer toward the sun. This haze carries most of the "aura".
 
@@ -227,7 +241,7 @@ These times come from analysing the mp3. The exact beats get checked in M1 with 
 - **New parts:**
   - city table: palette, plot rules, facade painter, roofs, props, landmark builder, sky and light preset, stamp text;
   - street builder, which works in small slices;
-  - landmark builders;
+  - landmark designs (paper cut-outs) and the card painter;
   - turn director: schedule and camera path;
   - atmosphere cross-fade;
   - stamp and passport display.
@@ -241,7 +255,7 @@ These times come from analysing the mp3. The exact beats get checked in M1 with 
 |---|---|---|
 | **M1: Skeleton** | Page, audio, beat analysis + stored data, turn schedule, walk and corner turn, grey block streets, stamps | Turns land on the music for the whole song |
 | **M2: The look** | Street kit, facade painter, roofs, ground, lamps, sky, haze, final image, all finished on one reference city (Rome) | One street looks like a real Roman street at golden hour |
-| **M3: The cities** | The other 7 styles and landmarks, two at a time; corner swaps between styles | All 8 are recognisable from a screenshot |
+| **M3: The cities** | The other styles and landmarks, two at a time; corner swaps between styles | All 9 are recognisable from a screenshot |
 | **M4: Music & polish** | Beat reactions, pre-drop stop, signature effects, passport end page, quality levels, phone check, menu text in `index.html` | The full song plays smoothly on a laptop and a phone |
 | **M5: Optional** | 16 cities, lit rooms visible through windows, sun rays, route map | — |
 
@@ -253,7 +267,8 @@ Each step ends in a playable state, with screenshots for you.
 |---|---|
 | Procedural houses look cheap | Spend M2 on one city until it convinces; compare side by side with reference photos |
 | A landmark isn't recognisable from 200 m | Silhouette first; check each one as a small thumbnail |
-| A stutter when the next street is built | Build in slices during the 20 s walk; paint textures one city ahead |
+| A stutter when the next street is built | Build in slices during the 20 s walk; paint textures one city ahead; upload big textures a strip per frame; reuse big buffers so the garbage collector stays quiet |
+| Buildings of two streets overlap | Rows backing onto the same block share its depth; far parts only show while you look down that street |
 | A visible seam at the corner | Two-faced corner houses + light cross-fade + mid-turn flare |
 | The "1" of the bar is hard to find in this song | Re-sync at section changes; the owner panel can nudge the bar by a beat; check against the timeline view |
 | Phones too slow | Low quality: no shadows, fewer props, lower resolution, simpler facades |
@@ -261,7 +276,7 @@ Each step ends in a playable state, with screenshots for you.
 ## 12. Questions for you (my default in bold)
 
 1. **"Italy":** which city? **Rome (Colosseum)**, or Florence (Duomo), Venice (St. Mark's), Milan (Duomo)?
-2. **8 or 16 cities?** **8 now** (one song ≈ the whole trip), 16 later.
+2. **8 or 16 cities?** **9 now** (one song visits each once, Berlin added), more later.
 3. **"Low walk":** I read it as a **slow walk at eye level**. Or did you mean a low camera, close to the ground?
 4. **Paris as the 8th city:** **yes**, or another city?
 5. **Landmarks:** **Budapest = Parliament** (or St. Stephen's Basilica)? **Istanbul = Hagia Sophia** (or Galata Tower / Blue Mosque)? **Warsaw = Royal Castle + Sigismund's Column** (or the Palace of Culture)?
