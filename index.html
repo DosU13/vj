@@ -131,7 +131,7 @@
   const menu = document.getElementById('menu');
   const list = document.getElementById('menu-list');
 
-  const current = VJS.find((vj) => vj.id === new URLSearchParams(location.search).get('vj')) || VJS[0];
+  const current = VJS.find((vj) => vj.id === new URLSearchParams(location.search).get('vj')) || VJS.at(-1);
   document.title = current.title;
   frame.title = current.title;
   frame.src = current.src;
