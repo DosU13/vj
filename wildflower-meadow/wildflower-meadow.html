@@ -1785,11 +1785,11 @@ async function main() {
     if (!steer.dragging) {
       const turn = (steer.keys.has('left') ? 1 : 0) - (steer.keys.has('right') ? 1 : 0);
       const tilt = (steer.keys.has('up') ? 1 : 0) - (steer.keys.has('down') ? 1 : 0);
-      if (turn) c.yawVel = lerp(c.yawVel, turn * 1.1, ease(5));
+      if (turn) c.yawVel = lerp(c.yawVel, turn * 0.5, ease(4));   // an unhurried turn, about 30° a second
       else if (now - c.lastInput > 20000 && !reduceMotion) c.yawVel = lerp(c.yawVel, 0.03 * Math.sin(T * 0.045 + 1.3) + 0.012 * Math.sin(T * 0.11), ease(0.4));
-      else c.yawVel *= Math.exp(-dt * 4.5);            // a flung view coasts briefly to a stop
+      else c.yawVel *= Math.exp(-dt * 8);              // a flung view settles within a moment
       c.yaw = wrapPI(c.yaw + c.yawVel * dt);
-      if (tilt) c.pitch = clamp(c.pitch + tilt * 0.6 * dt, PITCH_MIN, PITCH_MAX);
+      if (tilt) c.pitch = clamp(c.pitch + tilt * 0.3 * dt, PITCH_MIN, PITCH_MAX);
       else if (now - c.lastTilt > 2500) c.pitch *= Math.exp(-dt * 0.5);   // the gaze settles back on the horizon
     }
     // the glide follows the view, a little behind it
@@ -2105,7 +2105,9 @@ async function main() {
     if (f) loadFile(f); else toast('Drop an audio file: MP3, M4A, WAV, OGG or FLAC');
   });
   // ---------- looking around: drag anywhere (a click without dragging starts the song) ----------
-  const DRAG = 0.0042;   // radians per pixel dragged: grab the view and pull it
+  // The view moves with the finger: a pixel of drag turns it by one pixel's worth of angle, so the spot
+  // you grabbed stays under the finger (or mouse).
+  const dragAngle = () => (VFOV * DEG) / Math.max(1, innerHeight);
   const touched = (tilt) => { camState.lastInput = performance.now(); if (tilt) camState.lastTilt = camState.lastInput; };
   addEventListener('pointerdown', (e) => {
     if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {});
@@ -2119,9 +2121,10 @@ async function main() {
     if (!steer.dragging || e.pointerId !== steer.id) return;
     const dx = e.clientX - steer.x, dy = e.clientY - steer.y, now = performance.now();
     steer.x = e.clientX; steer.y = e.clientY; steer.moved += Math.abs(dx) + Math.abs(dy);
-    camState.yaw = wrapPI(camState.yaw + dx * DRAG);
-    camState.pitch = clamp(camState.pitch + dy * DRAG, PITCH_MIN, PITCH_MAX);
-    steer.vx = lerp(steer.vx, (dx * DRAG) / (Math.max(1, now - steer.lastT) / 1000), 0.4);   // for the fling
+    const k = dragAngle();
+    camState.yaw = wrapPI(camState.yaw + dx * k);
+    camState.pitch = clamp(camState.pitch + dy * k, PITCH_MIN, PITCH_MAX);
+    steer.vx = lerp(steer.vx, (dx * k) / (Math.max(1, now - steer.lastT) / 1000), 0.4);   // for the fling
     steer.lastT = now;
     touched(dy !== 0);
   });
@@ -2129,7 +2132,7 @@ async function main() {
     if (!steer.dragging || e.pointerId !== steer.id) return;
     steer.dragging = false;
     const now = performance.now(), click = steer.moved < 8 && now - steer.t0 < 700;
-    camState.yawVel = click || now - steer.lastT > 100 ? 0 : clamp(steer.vx, -1.6, 1.6);
+    camState.yawVel = click || now - steer.lastT > 100 ? 0 : clamp(steer.vx, -0.45, 0.45);
     if (click && e.type === 'pointerup' && (app.mode === 'intro' || app.mode === 'end')) begin();
   };
   addEventListener('pointerup', endDrag);
