@@ -1,0 +1,2253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wildflower Meadow</title>
+<meta name="description" content="A painterly flower meadow with lakes, rolling cloud banks and snowy peaks that moves with the music.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Full-bleed painted meadow. Owner controls hide behind the ` key, like the other VJs. One bright look by design. */
+:root {
+  color-scheme: dark;
+  --ink: #fbf8f1;
+  --ink-soft: rgba(251, 248, 241, 0.74);
+  --ink-faint: rgba(251, 248, 241, 0.5);
+  --glass: rgba(12, 42, 66, 0.52);
+  --edge: rgba(255, 255, 255, 0.17);
+  --well: rgba(0, 0, 0, 0.2);
+  --accent: #ff9ec4;
+  --accent-ink: #3a0f22;
+  --font-ui: "Manrope", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden;
+  background: #0a74ad; color: var(--ink);
+  font: 400 14px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+kbd {
+  font: 600 11px/1 var(--font-ui);
+  padding: 2px 6px 3px; border-radius: 5px;
+  border: 1px solid var(--edge); border-bottom-width: 2px;
+  background: var(--well); color: var(--ink-soft);
+}
+
+.stage { position: fixed; inset: 0; background: linear-gradient(#0579b5, #2a8fbf 52%, #7fae4a 52%, #4e8a2c); }
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; opacity: 0; transition: opacity 1.8s ease; }
+.stage canvas.in { opacity: 1; }
+
+.loader {
+  position: fixed; inset: 0; z-index: 4; margin: 0;
+  display: grid; place-items: center; pointer-events: none;
+  font: 600 12px/1.5 var(--font-ui); letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--ink); text-shadow: 0 1px 12px rgba(0, 40, 80, 0.45);
+  transition: opacity 0.9s ease;
+}
+.loader.out { opacity: 0; }
+
+.hint {
+  position: fixed; z-index: 5; left: 50%; bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); box-sizing: border-box;
+  padding: 9px 18px; border-radius: 999px;
+  background: rgba(8, 38, 62, 0.34); border: 1px solid var(--edge);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font: 600 11px/1.4 var(--font-ui); letter-spacing: 0.16em; text-transform: uppercase; text-align: center;
+  color: var(--ink); opacity: 0; pointer-events: none; transition: opacity 1.2s ease;
+}
+.hint.in { opacity: 0.92; }
+.hint .breathe { display: inline-block; animation: breathe 2.6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+/* ---------- owner panel (` key) ---------- */
+body:not(.dev) #panel { display: none !important; }
+.panel {
+  position: fixed; z-index: 10;
+  left: max(16px, env(safe-area-inset-left, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  width: min(340px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 18px 18px 14px; display: grid; gap: 14px;
+  background: var(--glass); border: 1px solid var(--edge); border-radius: 18px;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: 0 24px 70px rgba(0, 20, 40, 0.35);
+}
+.panel h1 { margin: 0; font: 700 20px/1.2 var(--font-ui); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 4px; font: 600 10.5px/1.2 var(--font-ui); letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); }
+.nowplaying { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.track { flex: 1; min-width: 0; margin: 0; font-size: 13px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clock { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-faint); white-space: nowrap; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.08);
+  padding: 8px 12px; border-radius: 10px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: background-color 0.15s ease;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.16); }
+.btn:focus-visible, .seg button:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.slider { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+.slider input { width: 100%; accent-color: var(--accent); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--well); border: 1px solid var(--edge); }
+.seg button { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.18); color: var(--ink); }
+.qrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+.keys { margin: 0; font-size: 12px; color: var(--ink-faint); line-height: 2; }
+
+.toast {
+  position: fixed; z-index: 12; left: 50%; top: max(20px, env(safe-area-inset-top, 0px));
+  transform: translate(-50%, -8px); max-width: calc(100vw - 32px); box-sizing: border-box;
+  padding: 9px 16px; border-radius: 12px;
+  background: rgba(8, 38, 62, 0.62); border: 1px solid var(--edge);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font-size: 13px; font-weight: 600; opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.fallback { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; text-align: center; background: #0a5f8f; }
+.fallback h2 { margin: 0 0 8px; font: 700 24px/1.2 var(--font-ui); }
+.fallback p { margin: 0; max-width: 460px; color: var(--ink-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+  .stage canvas, .hint, .loader, .toast { transition: none; }
+  .hint .breathe { animation: none; }
+}
+</style>
+<script src="../vj-bridge.js"></script>
+</head>
+<body>
+<div id="stage" class="stage" aria-hidden="true"></div>
+<p id="loader" class="loader"><span>painting the mountains<span id="loader-pct"></span></span></p>
+<p id="hint" class="hint" aria-live="polite"></p>
+
+<section id="panel" class="panel" aria-labelledby="panel-title">
+  <header>
+    <p class="eyebrow">VJ controls</p>
+    <h1 id="panel-title">Wildflower Meadow</h1>
+  </header>
+  <div class="nowplaying">
+    <p id="track-name" class="track">Loading the song…</p>
+    <p id="track-clock" class="clock" aria-live="off"></p>
+  </div>
+  <div class="btns">
+    <button id="play-btn" class="btn" type="button">Play</button>
+    <button id="file-btn" class="btn" type="button">Choose a song</button>
+    <button id="default-btn" class="btn" type="button" hidden>Default song</button>
+    <button id="mic-btn" class="btn" type="button" aria-pressed="false">Microphone</button>
+  </div>
+  <input id="file-input" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.opus,.flac,.webm" hidden>
+  <label class="slider" for="set-wind"><span>Wind</span><input id="set-wind" type="range" min="0" max="2" step="0.05"></label>
+  <label class="slider" for="set-speed"><span>Glide</span><input id="set-speed" type="range" min="0" max="2.5" step="0.05"></label>
+  <div class="qrow"><span>Quality</span>
+    <div class="seg" role="group" aria-label="Quality">
+      <button type="button" data-q="auto">Auto</button><button type="button" data-q="high">High</button><button type="button" data-q="low">Low</button>
+    </div>
+  </div>
+  <p class="keys">Drag or <kbd>←</kbd> <kbd>→</kbd> to look around · <kbd>Space</kbd> play · <kbd>[</kbd> <kbd>]</kbd> seek · <kbd>M</kbd> mic · <kbd>F</kbd> fullscreen · <kbd>`</kbd> hide · drop a song to swap it</p>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="fallback" class="fallback" hidden>
+  <div>
+    <h2>The meadow needs WebGL 2</h2>
+    <p>This browser couldn’t start 3D graphics. Try a current Chrome, Edge, Firefox or Safari, and check that hardware acceleration is switched on.</p>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+/* =====================================================================
+   Small utilities
+   ===================================================================== */
+const TAU = Math.PI * 2, DEG = Math.PI / 180;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth01 = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+// yields to the browser between chunks of long work (also in a background tab, unlike requestAnimationFrame)
+const nextFrame = () => new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+const reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('wfm.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('wfm.' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+};
+const settings = {
+  wind: clamp(+store.get('wind', 1) || 0, 0, 2),
+  speed: clamp(+store.get('speed', 1) || 0, 0, 2.5),
+  quality: ['auto', 'high', 'low'].includes(store.get('quality', 'auto')) ? store.get('quality', 'auto') : 'auto',
+};
+const $ = (id) => document.getElementById(id);
+const ui = {
+  stage: $('stage'), loader: $('loader'), loaderPct: $('loader-pct'), hint: $('hint'), panel: $('panel'),
+  track: $('track-name'), clock: $('track-clock'), fileBtn: $('file-btn'), defaultBtn: $('default-btn'), playBtn: $('play-btn'), micBtn: $('mic-btn'), fileInput: $('file-input'),
+  wind: $('set-wind'), speed: $('set-speed'), qBtns: [...document.querySelectorAll('[data-q]')],
+  toast: $('toast'), fallback: $('fallback'),
+};
+let toastTimer = 0;
+function toast(msg, ms = 2600) {
+  ui.toast.textContent = msg; ui.toast.hidden = false;
+  requestAnimationFrame(() => ui.toast.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    ui.toast.classList.remove('show');
+    setTimeout(() => { if (!ui.toast.classList.contains('show')) ui.toast.hidden = true; }, 350);
+  }, ms);
+}
+let hintTimer = 0;
+function hint(text, ms = 7000, breathe = false) {
+  const span = document.createElement('span');
+  span.textContent = text;
+  if (breathe) span.className = 'breathe';
+  ui.hint.replaceChildren(span);
+  requestAnimationFrame(() => ui.hint.classList.add('in'));
+  clearTimeout(hintTimer);
+  if (ms) hintTimer = setTimeout(() => ui.hint.classList.remove('in'), ms);
+}
+
+/* =====================================================================
+   World constants
+   The ground repeats every 2048 m (all ground noise is periodic), so the
+   camera can wrap back without a seam and float precision stays high.
+   ===================================================================== */
+const PERIOD = 2048;
+const VFOV = 36;                       // degrees, vertical
+const EYE = 1.35;                      // camera height above the meadow (m)
+const PITCH = 0.75 * DEG;              // a touch upward: the horizon sits just below the middle
+const SUN = new THREE.Vector3(-0.72, 0.58, 0.38).normalize(); // from the left, a little behind us
+const TILE = 32;                       // vegetation tile (m); divides PERIOD
+
+/* =====================================================================
+   GLSL: shared ground fields (water, flowers, grass, wind)
+   Used by the meadow shader and by the grass / flower vertex shaders,
+   so the instanced plants grow exactly where the painted ground says.
+   ===================================================================== */
+const GLSL_FIELDS = /* glsl */`
+uniform float uWaterBias;
+uniform vec2 uWindDir;
+uniform vec2 uWindOff;      // how far the breeze has carried its pattern (m)
+uniform float uWindAmp;
+uniform vec4 uGusts[6];
+uniform vec3 uCam;
+// Always 1. Loop counts are multiplied by it so the Windows (Direct3D) shader compiler can't unroll
+// them: unrolled, these shaders take many seconds to compile there.
+uniform int uOne;
+uniform sampler2D tHash;   // 256 × 256 random bytes: a lattice hash that costs one fetch
+uniform sampler2D tRand;   // 256 × 256 × 4 independent random bytes: four values for a cell in one fetch
+
+// c is a wrapped lattice point (whole numbers); every seed reads its own offset into the table
+float hcell(vec2 c, float seed) {
+  return texelFetch(tHash, ivec2(mod(c + vec2(seed * 37.0, seed * 91.0), 256.0)), 0).r;
+}
+vec4 hcell4(vec2 c, float seed) {
+  return texelFetch(tRand, ivec2(mod(c + vec2(seed * 37.0, seed * 91.0), 256.0)), 0);
+}
+// value noise on an integer lattice that wraps every N cells
+float pnoise(vec2 p, vec2 N, float seed) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 a = mod(i, N);
+  vec2 b = mod(i + 1.0, N);
+  float v00 = hcell(a, seed);
+  float v10 = hcell(vec2(b.x, a.y), seed);
+  float v01 = hcell(vec2(a.x, b.y), seed);
+  float v11 = hcell(b, seed);
+  return mix(mix(v00, v10, u.x), mix(v01, v11, u.x), u.y);
+}
+// world noise with cells of c metres (c divides 2048), 0..1
+float wn(vec2 P, float c, float seed) { return pnoise(P / c, vec2(2048.0 / c), seed); }
+float wn2(vec2 P, vec2 c, float seed) { return pnoise(P / c, 2048.0 / c, seed); }
+// detail smaller than the pixel footprint fades to its average, so nothing shimmers
+float fadeFor(float c, float fp) { return 1.0 - smoothstep(0.3, 0.9, fp / c); }
+float oct(vec2 P, float c, float seed, float fp) { return mix(0.5, wn(P, c, seed), fadeFor(c, fp)); }
+
+// A little lake or islet in one cell of a grid: a wobbly oval, turned any way. Returns roughly
+// how far P is from its shore (m), < 0 inside. It never reaches past its own cell, so one lookup
+// finds it. Too small for the pixel, it shrinks away instead of flickering.
+float blob(vec2 P, float cell, float seed, float pOn, vec2 radii, float fp) {
+  vec2 c = floor(P / cell);
+  vec2 cm = mod(c, vec2(2048.0 / cell));
+  vec4 h = hcell4(cm, seed);
+  if (h.x > pOn) return 1e3;
+  float r = mix(radii.x, radii.y, h.x / pOn);
+  r *= 1.0 - smoothstep(0.5, 1.6, fp / r);
+  vec2 d = P - (c + 0.3 + 0.4 * h.yz) * cell;
+  float th = 6.283 * h.w;
+  d = mat2(cos(th), sin(th), -sin(th), cos(th)) * d;
+  d.y /= 0.72 + 0.28 * fract(h.y * 13.7 + h.z * 5.1);
+  float a = atan(d.y, d.x);
+  float wob = 0.11 * sin(3.0 * a + 6.283 * h.z) + 0.06 * sin(5.0 * a + 6.283 * h.y) + 0.03 * sin(8.0 * a + 40.0 * h.w);
+  return length(d) - r * (1.0 + wob);
+}
+// the big lakes: > 0 on land
+float lakeField(vec2 P, float fp) {
+  vec2 w = vec2(0.0);
+  for (int i = 0; i < 4 * uOne; i++) {      // the warp: 64 m and 16 m, two of each
+    float c = i < 2 ? 64.0 : 16.0;
+    float k = i < 2 ? 1.0 : 0.45 * fadeFor(16.0, fp);
+    float v = (wn(P, c, 11.0 + float(i)) - 0.5) * k;
+    if ((i & 1) == 0) w.x += v; else w.y += v;
+  }
+  vec2 Q = P + w * vec2(30.0, 18.0);
+  float n = 0.0, c = 128.0;
+  for (int i = 0; i < 7 * uOne; i++) {      // cells of 128 m down to 2 m (those finer than the pixel are skipped)
+    float k = i == 0 ? 0.7 : (i == 1 ? 0.8 : exp2(1.0 - float(i))) * fadeFor(c, fp);
+    if (k > 0.0) n += (wn(Q, c, i == 0 ? 1.0 : 1.0 + float(i)) - 0.5) * k;
+    c *= 0.5;
+  }
+  return n + uWaterBias;
+}
+// the big lakes' value at P (lakes), plus little lakes in most 64 m cells, islets in most 32 m cells
+// and tiny ones in some 16 m cells
+float waterAt(vec2 P, float lakes, float fp) {
+  float W = lakes;
+  for (int i = 0; i < 3 * uOne; i++) {   // one loop, so the blob code is compiled once
+    float d = 0.045 * blob(P, i == 0 ? 64.0 : (i == 1 ? 32.0 : 16.0), i == 0 ? 37.0 : (i == 1 ? 41.0 : 45.0),
+                           i == 0 ? 0.62 : (i == 1 ? 0.75 : 0.4), i == 0 ? vec2(4.5, 11.0) : (i == 1 ? vec2(1.5, 5.5) : vec2(0.7, 2.6)), fp);
+    W = i == 0 ? min(W, d) : max(W, -d);   // a little lake cuts into the land; an islet rises from the water
+  }
+  return W;
+}
+// > 0 on land, < 0 in the water: big lakes, little lakes scattered over the meadow, islets in the water
+float waterField(vec2 P, float fp) { return waterAt(P, lakeField(P, fp), fp); }
+// x: how thick the flowers grow here, y: which colours (pink … white … yellow)
+vec2 flowerField(vec2 P, float fp) {
+  vec2 w = (vec2(oct(P, 64.0, 21.0, fp), oct(P, 64.0, 22.0, fp)) - 0.5) * 34.0;
+  vec2 Q = P + w;
+  // drifts tens of metres long carry the contrast, so far away they still read as pink and green bands
+  float big = wn(Q, 128.0, 29.0) * 0.5 + oct(Q, 32.0, 23.0, fp) * 0.5;
+  float small = oct(Q, 8.0, 24.0, fp) * 0.6 + oct(Q, 2.0, 25.0, fp) * 0.4;
+  float edge = 0.035 + fp * 0.01;   // crisp drift edges up close, softened as they shrink below a pixel
+  float dens = smoothstep(0.47 - edge, 0.47 + edge, big * 0.62 + small * 0.38);
+  float pal = wn(P, 256.0, 26.0) * 0.55 + oct(Q, 32.0, 27.0, fp) * 0.45;
+  return vec2(dens, pal);
+}
+float grassTone(vec2 P, float fp) {
+  return oct(P, 32.0, 41.0, fp) * 0.55 + oct(P, 8.0, 42.0, fp) * 0.3 + oct(P, 2.0, 43.0, fp) * 0.15;
+}
+// how hard the wind presses the grass here: a drifting breeze plus gust fronts (one per beat)
+float windAt(vec2 P) {
+  vec2 Q = P - uWindOff;
+  float n = wn(Q, 32.0, 51.0) * 0.65 + wn(Q, 8.0, 52.0) * 0.35;
+  float w = uWindAmp * (0.2 + 1.25 * n * n);
+  float along = dot(P - uCam.xz, uWindDir) + (wn(P, 16.0, 53.0) - 0.5) * 9.0;
+  for (int i = 0; i < 6 * uOne; i++) {
+    vec4 g = uGusts[i];
+    float d = (along - g.x) / g.z;
+    w += g.y * exp(-d * d);
+  }
+  return w;
+}
+vec3 flowerColor(float pal, float r) {
+  vec3 pink  = mix(vec3(0.90, 0.52, 0.60), vec3(0.97, 0.73, 0.76), fract(r * 7.13));
+  vec3 white = mix(vec3(0.93, 0.89, 0.86), vec3(0.99, 0.97, 0.95), fract(r * 5.71));
+  vec3 yel   = mix(vec3(0.86, 0.74, 0.22), vec3(0.97, 0.88, 0.38), fract(r * 3.37));
+  vec3 c = pink;
+  c = mix(c, r < 0.45 ? white : pink, smoothstep(0.42, 0.5, pal));
+  c = mix(c, r < 0.8 ? white : pink, smoothstep(0.6, 0.66, pal));
+  c = mix(c, r < 0.6 ? yel : white, smoothstep(0.74, 0.8, pal));
+  return c;
+}
+vec3 flowerAvg(float pal) {
+  vec3 pink = vec3(0.93, 0.62, 0.68), white = vec3(0.96, 0.93, 0.90), yel = vec3(0.91, 0.81, 0.30);
+  vec3 c = pink;
+  c = mix(c, mix(pink, white, 0.45), smoothstep(0.42, 0.5, pal));
+  c = mix(c, mix(pink, white, 0.8), smoothstep(0.6, 0.66, pal));
+  c = mix(c, mix(white, yel, 0.6), smoothstep(0.74, 0.8, pal));
+  return c;
+}
+`;
+
+/* =====================================================================
+   GLSL: the far mountains, ray-marched once into a panorama
+   (heights in km; camera at the origin looking down -z)
+   ===================================================================== */
+const SKY_GLSL = /* glsl */`
+vec3 skyColor(vec3 rd) {
+  float e = clamp(rd.y, 0.0, 1.0);
+  return mix(vec3(0.17, 0.60, 0.75), vec3(0.02, 0.475, 0.72), smoothstep(0.0, 0.33, e));
+}
+`;
+const FS_VERT = /* glsl */`
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+const PANO_FRAG = /* glsl */`
+uniform vec2 uPanoMin;
+uniform vec2 uPanoMax;
+uniform vec3 uSun;
+uniform float uPixAng;
+uniform int uOne;   // always 1; keeps the Direct3D compiler from unrolling the loops (see GLSL_FIELDS)
+varying vec2 vUv;
+${SKY_GLSL}
+const mat2 M2 = mat2(0.80, 0.60, -0.60, 0.80);
+float hh(vec2 p) { p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113)); return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y)); }
+vec3 noised(vec2 x) {
+  vec2 i = floor(x), f = fract(x);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  float a = hh(i), b = hh(i + vec2(1.0, 0.0)), c = hh(i + vec2(0.0, 1.0)), d = hh(i + vec2(1.0, 1.0));
+  float k1 = b - a, k2 = c - a, k4 = a - b - c + d;
+  return vec3(a + k1 * u.x + k2 * u.y + k4 * u.x * u.y, du * (vec2(k1, k2) + k4 * u.yx));
+}
+float ridged(vec2 p, int oct) {
+  float s = 0.0, b = 0.55, w = 1.0;
+  for (int i = 0; i < oct * uOne; i++) {
+    float n = 1.0 - abs(noised(p).x);
+    n *= n;
+    s += b * n * w;
+    w = clamp(n * 1.7, 0.0, 1.0);
+    b *= 0.5;
+    p = M2 * p * 2.03;
+  }
+  return s;
+}
+float eroded(vec2 p, int oct) {
+  float s = 0.0, b = 0.5;
+  vec2 d = vec2(0.0);
+  for (int i = 0; i < oct * uOne; i++) {
+    vec3 n = noised(p);
+    d += n.yz;
+    s += b * n.x / (1.0 + dot(d, d));
+    b *= 0.5;
+    p = M2 * p * 2.0;
+  }
+  return s;
+}
+// a bump of height h around azimuth c (radians) with half-width w, the long way round counting too
+float peak(float th, float c, float w, float h) { float d = mod(th - c + 3.14159265, 6.2831853) - 3.14159265; return h * exp(-d * d / (w * w)); }
+// The main range ahead: a broad summit left of centre, a lower saddle, a second massif to the right.
+// Lower ranges at other distances close the ring all the way round, with a few gaps of open horizon.
+float envelope(vec2 p) {
+  float x = p.x;
+  float zr = -13.2 + 0.9 * sin(x * 0.21 + 0.4) + 0.012 * x * x;
+  float hx = 1.15
+           + 1.65 * exp(-pow((x + 1.4) / 2.6, 2.0))
+           + 0.85 * exp(-pow((x + 5.2) / 1.9, 2.0))
+           + 0.95 * exp(-pow((x - 4.6) / 2.2, 2.0))
+           + 0.75 * exp(-pow((x - 8.6) / 2.4, 2.0))
+           + 0.5 * exp(-pow((x + 10.0) / 3.0, 2.0));
+  hx *= smoothstep(-20.0, -12.0, x) * smoothstep(22.0, 14.0, x);
+  float d = p.y - zr;
+  float h = hx * exp(-pow(d / (d > 0.0 ? 3.6 : 2.6), 2.0));
+  h += 0.22 * exp(-pow((x - 1.8) / 3.0, 2.0) - pow((p.y + 10.0) / 1.2, 2.0));   // foothills in front
+  // the ring: azimuth th (0 ahead, growing to the right) and the ridge's distance R there
+  float th = atan(p.x, -p.y);
+  float R = 15.5 + 2.5 * sin(2.0 * th + 1.1) + 1.5 * sin(3.0 * th + 0.4);
+  float H = 0.45 + 0.12 * sin(7.0 * th + 2.0)
+          + peak(th, 1.62, 0.22, 1.75) + peak(th, 2.2, 0.16, 1.1) + peak(th, 2.9, 0.3, 0.75)
+          + peak(th, -2.6, 0.2, 1.5) + peak(th, -1.95, 0.15, 0.95) + peak(th, -1.38, 0.24, 1.65);
+  H *= smoothstep(0.75, 1.1, abs(th));                 // ahead, the main range stands alone
+  H *= 1.0 - 0.75 * exp(-pow((th + 2.06) / 0.2, 2.0));  // low ground toward the sun
+  float dr = length(p) - R;
+  return max(h, H * exp(-pow(dr / (dr > 0.0 ? 3.6 : 2.4), 2.0)));
+}
+float hmapE(vec2 p, float e, int oct) {
+  float r = ridged(p * 0.62 + vec2(3.1, 7.7), oct);
+  float er = eroded(p * 1.35 + vec2(-2.3, 1.9), oct > 1 ? oct - 1 : 1);
+  // low slopes keep some crags of their own, so the foot of the range isn't a smooth dome
+  float rough = e * 0.82 + 0.28 * smoothstep(0.08, 0.5, e);
+  return max(e * 0.77 + rough * (0.4 * (r - 0.45) + 0.25 * er), 0.0);
+}
+float hmap(vec2 p, int oct) { return hmapE(p, envelope(p), oct); }
+// the terrain never rises above this cheap bound, so empty air is crossed in big steps
+float hBound(float e) { return e * 1.23 + 0.17 * smoothstep(0.08, 0.5, e) + 0.012; }
+// heights at four points around p (left, right, near, far), in one loop so hmap is compiled once
+vec4 cross4(vec2 p, float e, int oct) {
+  vec4 h = vec4(0.0);
+  for (int i = 0; i < 4 * uOne; i++) {
+    vec2 o = i == 0 ? vec2(-e, 0.0) : i == 1 ? vec2(e, 0.0) : i == 2 ? vec2(0.0, -e) : vec2(0.0, e);
+    h[i] = hmap(p + o, oct);
+  }
+  return h;
+}
+vec3 calcNormal(vec2 p, float e) {
+  vec4 h = cross4(p, e, 8);
+  return normalize(vec3(h.x - h.y, 2.0 * e, h.z - h.w));
+}
+float softShadow(vec3 ro, vec3 rd) {
+  float res = 1.0, t = 0.03;
+  for (int i = 0; i < 24 * uOne; i++) {
+    vec3 p = ro + rd * t;
+    float e = envelope(p.xz);
+    if (p.y > hBound(e) + 0.05) { t += max(p.y - hBound(e), 0.05); if (p.y > 3.6) break; continue; }
+    float h = p.y - hmapE(p.xz, e, 3);
+    res = min(res, 9.0 * h / t);
+    if (res < 0.001) break;
+    t += clamp(h * 0.6, 0.02, 0.45);
+  }
+  return clamp(res, 0.0, 1.0);
+}
+vec3 ramp3(vec3 a, vec3 b, vec3 c, float x) { return x < 0.5 ? mix(a, b, x * 2.0) : mix(b, c, x * 2.0 - 1.0); }
+void main() {
+  vec2 ang = mix(uPanoMin, uPanoMax, vUv);
+  if (ang.y < -0.002) { gl_FragColor = vec4(0.0); return; }   // below the horizon the meadow covers it
+  vec3 rd = vec3(sin(ang.x) * cos(ang.y), sin(ang.y), -cos(ang.x) * cos(ang.y));
+  vec3 ro = vec3(0.0, 0.0014, 0.0);
+  float t = 4.0, tPrev = 4.0;
+  bool hit = false;
+  for (int i = 0; i < 320 * uOne; i++) {
+    vec3 p = ro + rd * t;
+    if (t > 40.0 || p.y > 3.6) break;
+    float e = envelope(p.xz);
+    float hb = hBound(e);
+    if (p.y > hb) { tPrev = t; t += max((p.y - hb) * 0.6, 0.003 * t); continue; }
+    // a 3-octave height plus the most the finer octaves could add: still clear of it means a safe step
+    float slack = 0.17 * (e * 0.82 + 0.28 * smoothstep(0.08, 0.5, e)) + 0.003;
+    float dy3 = p.y - hmapE(p.xz, e, 3);
+    if (dy3 > slack) { tPrev = t; t += max((dy3 - slack) * 0.45, 0.0015 * t); continue; }
+    float dy = p.y - hmapE(p.xz, e, 6);
+    if (dy < 0.00025 * t) { hit = true; break; }
+    tPrev = t;
+    t += max(dy * 0.42, 0.001 * t);
+  }
+  if (!hit) { gl_FragColor = vec4(0.0); return; }
+  float lo = tPrev, hi = t;
+  for (int k = 0; k < 6 * uOne; k++) {
+    float m = 0.5 * (lo + hi);
+    vec3 p = ro + rd * m;
+    if (p.y - hmap(p.xz, 8) < 0.0) hi = m; else lo = m;
+  }
+  float tHit = hi;
+  vec3 pos = ro + rd * tHit;
+  // broad normals: the faces read as painted planes rather than noise
+  vec3 n = calcNormal(pos.xz, max(tHit * uPixAng * 7.0, 0.008));
+  float hN = noised(pos.xz * 7.0).x * 0.5 + noised(pos.xz * 23.0).x * 0.25;
+  float alt = pos.y;
+  float snowLine = 0.85 + 0.22 * noised(pos.xz * 1.3 + 4.0).x;
+  // snow lies on ledges and gentle slopes; steep faces show dark rock
+  float snow = smoothstep(snowLine - 0.2, snowLine + 0.2, alt + hN * 0.25) * smoothstep(0.44, 0.62, n.y + hN * 0.16);
+  float green = (1.0 - smoothstep(0.35, 0.85, alt + hN * 0.3)) * smoothstep(0.55, 0.8, n.y + hN * 0.25);
+
+  float dif = clamp(dot(n, uSun), 0.0, 1.0);
+  float sha = softShadow(pos + vec3(0.0, 0.004, 0.0), uSun);
+  float lit = dif * mix(0.3, 1.0, sha) + hN * 0.06;
+  // a few crisp tones, like brushed planes of light and shade
+  float tone = smoothstep(0.05, 0.12, lit) * 0.36 + smoothstep(0.29, 0.36, lit) * 0.34 + smoothstep(0.54, 0.63, lit) * 0.30;
+  float sky = 0.5 + 0.5 * n.y;
+  vec3 snowC = ramp3(vec3(0.34, 0.44, 0.57), vec3(0.63, 0.71, 0.77), vec3(0.95, 0.945, 0.92), tone);
+  snowC = mix(snowC, snowC * vec3(0.93, 0.97, 1.05), (1.0 - sky) * 0.4);
+  vec3 rockC = ramp3(vec3(0.13, 0.19, 0.28), vec3(0.27, 0.34, 0.42), vec3(0.52, 0.55, 0.55), tone);
+  vec3 grnC = ramp3(vec3(0.12, 0.19, 0.22), vec3(0.21, 0.31, 0.29), vec3(0.34, 0.45, 0.28), tone);
+  vec3 col = mix(rockC, grnC, green);
+  col = mix(col, snowC, snow);
+  col *= 0.96 + 0.08 * (noised(pos.xz * 30.0).x * 0.5 + 0.5);
+  // crevices hold shade
+  float hs = dot(cross4(pos.xz, 0.12, 4), vec4(0.25));
+  col *= clamp(0.85 + (alt - hs) * 2.5, 0.62, 1.06);
+  // air between us and the peaks
+  vec3 air = mix(skyColor(rd), vec3(0.80, 0.86, 0.90), 0.45);
+  col = mix(col, air, 1.0 - exp(-tHit * 0.014));
+  col = mix(col, vec3(0.80, 0.85, 0.82), exp(-max(alt, 0.0) / 0.16) * 0.45);   // the feet of the ranges stand in haze
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+/* =====================================================================
+   GLSL: sky, cloud banks and the painted meadow (one full-screen pass)
+   ===================================================================== */
+const BG_VERT = /* glsl */`
+uniform mat4 uCamMat;
+uniform vec2 uTanHalf;
+varying vec3 vDir;
+void main() {
+  vDir = (uCamMat * vec4(position.x * uTanHalf.x, position.y * uTanHalf.y, -1.0, 0.0)).xyz;
+  gl_Position = vec4(position.xy, 1.0, 1.0);
+}
+`;
+const BG_FRAG = /* glsl */`
+${GLSL_FIELDS}
+${SKY_GLSL}
+uniform sampler2D tPano;
+uniform vec4 uPanoA;   // the panorama's bands: width, side margin, lowest and highest elevation (radians)
+uniform vec4 uPanoB;   // where they sit in the texture (0..1): band height, band pitch, first band's bottom; band count
+uniform float uPanoLod;
+uniform vec3 uSun;
+uniform float uPixAng;
+uniform float uTime;
+uniform float uCloudT;
+uniform float uSparkle;
+uniform vec3 uHaze;
+uniform float uDebug;
+uniform vec2 uMapRes;
+varying vec3 vDir;
+
+const float RAD2DEG = 57.29578;
+const float BANK = 0.12;    // the grass edge stands this far above the water (m)
+const float GRASSH = 0.3;
+
+float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float vn3(vec3 x) {
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(mix(mix(h31(i), h31(i + vec3(1, 0, 0)), f.x), mix(h31(i + vec3(0, 1, 0)), h31(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(h31(i + vec3(0, 0, 1)), h31(i + vec3(1, 0, 1)), f.x), mix(h31(i + vec3(0, 1, 1)), h31(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+
+// the panorama is six bands of azimuth stacked in one texture; each has a margin, so filtering never crosses a seam
+vec4 mountains(vec3 rd, float lod) {
+  float v = (asin(clamp(rd.y, -1.0, 1.0)) - uPanoA.z) / (uPanoA.w - uPanoA.z);
+  if (v < 0.0 || v > 1.0) return vec4(0.0);
+  float a = atan(rd.x, -rd.z) + 3.14159265;
+  float k = min(floor(a / uPanoA.x), uPanoB.w - 1.0);
+  float u = (a - k * uPanoA.x + uPanoA.y) / (uPanoA.x + 2.0 * uPanoA.y);
+  return textureLod(tPano, vec2(u, uPanoB.z + k * uPanoB.y + v * uPanoB.x), lod);
+}
+// the sun: a soft glow around it and the disc itself, when it comes into view
+vec3 sunGlow(vec3 rd) {
+  float s = max(dot(rd, uSun), 0.0);
+  return vec3(1.0, 0.94, 0.82) * (pow(s, 8.0) * 0.07 + pow(s, 90.0) * 0.22) + vec3(1.0, 0.98, 0.92) * smoothstep(0.99955, 0.99975, s) * 1.4;
+}
+
+// ---- the cloud banks: a soft height-field in (azimuth, elevation) degrees, all the way round ----
+// Azimuth runs from -130° to 230°: the seam lies in the clear gap toward the sun.
+float azc(float phi) { return phi < -130.0 ? phi + 360.0 : phi; }
+float wrapDeg(float d) { return mod(d + 180.0, 360.0) - 180.0; }
+// how tall the bank stands at azimuth phi: a big bank framing the mountains on the left, a lower one
+// on the right, one more behind; between them the far ranges show
+float cloudTop(float phi) {
+  float p = wrapDeg(phi);
+  float L = smoothstep(4.0, -40.0, p) * smoothstep(-78.0, -58.0, p);
+  float R = smoothstep(14.0, 44.0, p) * smoothstep(80.0, 60.0, p);
+  float B = smoothstep(38.0, 15.0, abs(wrapDeg(p - 170.0)));
+  // away from the view ahead, the banks' tops rise and fall, so no bank shows a row of equal billows
+  float pr = radians(p);
+  float wander = 1.0 + smoothstep(40.0, 70.0, abs(p)) * (0.16 * sin(5.0 * pr + 1.0) + 0.1 * sin(9.0 * pr + 2.3) + 0.06 * sin(14.0 * pr + 0.7));
+  return 0.5 + (15.5 * pow(L, 0.7) + 8.5 * pow(R, 0.8) + 9.0 * pow(B, 0.75)) * wander;
+}
+float h11(float x) { return fract(sin(x * 127.1 + 31.7) * 43758.5453); }
+float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(a, b, h) + k * h * (1.0 - h); }
+// The bank is a slab with big soft lobes heaped along its top edge. z is how far the cloud bulges
+// toward us (in degrees); the lobes melt into each other, so the bank billows instead of looking like balls.
+float lobes(vec2 q) {
+  float T = uCloudT;
+  float top = cloudTop(q.x);
+  float slab = (top - q.y) * 0.55;
+  float tall = smoothstep(2.5, 7.0, top);   // only the tall banks billow; the horizon haze stays smooth
+  if (tall <= 0.0) return slab;
+  float dir = q.x < 9.0 ? -1.0 : 1.0;      // the banks roll slowly outward from the gap ahead
+  float u = -1e3;
+  for (int j = 0; j < 6 * uOne; j++) {                    // 2 rows × 3 neighbouring lobes
+    int row = j / 3;
+    float fr = float(row);
+    float cw = row == 0 ? 7.2 : 3.75;                     // lobe spacing (deg): 50 and 96 lobes round the sky
+    float drift = T * (0.045 + 0.03 * fr) * dir;
+    float qx = q.x + drift;
+    float id = floor(qx / cw) + float(j - row * 3 - 1);
+    float idw = mod(id, row == 0 ? 50.0 : 96.0);
+    float a = h11(idw + fr * 17.0), b = h11(idw * 1.7 + fr * 5.3 + 2.0);
+    float x = (id + 0.15 + 0.7 * a) * cw;
+    float tp = cloudTop(x - drift);
+    float r = cw * (0.62 + 0.38 * b) * clamp(tp / 9.0, 0.3, 1.0);
+    float y = tp - r * (row == 0 ? 0.5 : 0.15) + sin(T * (0.1 + 0.05 * a) + b * 6.283) * r * 0.08;
+    vec2 d = vec2(qx - x, q.y - y);
+    float s = r * r - dot(d, d);
+    // a sphere's bulge inside it, its distance outside: lobes blend only where they actually meet
+    u = smax(u, (s > 0.0 ? sqrt(s) : r - length(d)) * 0.75, 1.2);
+  }
+  return mix(slab, smax(slab, u, 2.0), tall);
+}
+// broad, slow churn (shapes the billows and their light) and fine fluff (only frays the edges);
+// across the azimuth seam (230° = -130°) each blends into its own value one turn earlier, so it joins up
+float vnLo(vec2 q) { float T = uCloudT; return vn3(vec3((q - vec2(0.0, T * 0.03)) * 0.3, T * 0.02)); }
+float vnHi(vec2 q) {
+  float T = uCloudT;
+  vec2 p = q - vec2(0.0, T * 0.05);
+  return vn3(vec3(p * 0.9 + 7.0, T * 0.04)) * 0.6 + vn3(vec3(p * 2.3 - 3.0, T * 0.07)) * 0.4;
+}
+float softLo(vec2 q) { float a = vnLo(q), s = smoothstep(212.0, 230.0, q.x); return s > 0.0 ? mix(a, vnLo(q - vec2(360.0, 0.0)), s) : a; }
+float softHi(vec2 q) { float a = vnHi(q), s = smoothstep(212.0, 230.0, q.x); return s > 0.0 ? mix(a, vnHi(q - vec2(360.0, 0.0)), s) : a; }
+float cloudZ(vec2 q) { return lobes(q) + (softLo(q) - 0.5) * 2.0; }
+vec4 cloudBank(vec3 rd) {
+  float ph = atan(rd.x, -rd.z);
+  float phi = azc(ph * RAD2DEG);
+  float th = asin(clamp(rd.y, -1.0, 1.0)) * RAD2DEG;
+  float top = cloudTop(phi);
+  if (th > top + 8.0) return vec4(0.0);
+  vec2 q = vec2(phi, th);
+  // the cloud here and a little to the right and above, for its slope (one loop: compiled once)
+  float e = 0.45;
+  vec3 zs = vec3(0.0);
+  for (int i = 0; i < 3 * uOne; i++) {
+    zs[i] = cloudZ(q + (i == 1 ? vec2(e, 0.0) : i == 2 ? vec2(0.0, e) : vec2(0.0)));
+    if (i == 0 && zs.x < -2.0) return vec4(0.0);
+  }
+  float z = zs.x;
+  vec2 g = (zs.yz - z) / e;
+  vec3 n = normalize(vec3(-g, 3.4));
+  // the sun as this bank sees it: across (to the right), up, and toward us (softened, so no bank goes dark)
+  vec3 vd = vec3(sin(ph), 0.0, -cos(ph));
+  float toward = dot(uSun, vd);                          // > 0: we look toward the sun, the bank is backlit
+  vec3 L = normalize(vec3(dot(uSun, vec3(cos(ph), 0.0, sin(ph))), uSun.y, 0.6 - toward));
+  float dif = clamp(dot(n, L), 0.0, 1.0);
+  float fluff = softHi(q);
+  float alpha = smoothstep(-1.2, 2.0, z + (fluff - 0.5) * 1.6);
+  // soft, milky shading: the shade side is only a little greyer and bluer than the light side
+  vec3 cLit = vec3(0.935, 0.91, 0.865), cMid = vec3(0.87, 0.86, 0.83), cSh = vec3(0.74, 0.78, 0.80);
+  vec3 col = mix(cSh, cMid, smoothstep(0.5, 0.78, dif));
+  col = mix(col, cLit, smoothstep(0.78, 0.95, dif));
+  col *= 0.975 + 0.05 * fluff;
+  col = mix(col, cLit, (1.0 - alpha) * 0.35);           // thin edges catch the light
+  col = mix(col, vec3(1.0, 0.98, 0.93), (1.0 - alpha) * 0.5 * smoothstep(0.1, 0.7, toward));   // … more so against the sun
+  col = mix(col, uHaze, smoothstep(3.0, 0.0, th) * 0.5);
+  return vec4(col, alpha);
+}
+vec4 cloudCheap(vec3 rd) {
+  float phi = atan(rd.x, -rd.z) * RAD2DEG;
+  float th = asin(clamp(rd.y, -1.0, 1.0)) * RAD2DEG;
+  float top = cloudTop(phi);
+  float a = smoothstep(top + 1.0, top - 3.0, th) * 0.9;
+  return vec4(vec3(0.86, 0.85, 0.82), a);
+}
+vec3 skyWorld(vec3 rd, bool refl) {
+  vec3 col = skyColor(rd) + sunGlow(rd);
+  vec4 m = mountains(rd, refl ? uPanoLod + 1.5 : uPanoLod);
+  col = col * (1.0 - m.a) + m.rgb;
+  float th = asin(clamp(rd.y, -1.0, 1.0)) * RAD2DEG;
+  col = mix(col, uHaze, clamp(smoothstep(1.8, 0.0, th) * 0.5 + smoothstep(0.7, 0.0, th) * 0.45, 0.0, 0.95));   // the sky meets the meadow in haze
+  vec4 c = refl ? cloudCheap(rd) : cloudBank(rd);
+  return mix(col, c.rgb, c.a);
+}
+
+// ---- the meadow ----
+// the ground between the plants: in their shade, tinted by the flowers above it
+vec3 groundColor(vec2 ff, float g) {
+  vec3 gc = mix(vec3(0.30, 0.47, 0.16), vec3(0.47, 0.63, 0.20), smoothstep(0.25, 0.55, g));
+  gc = mix(gc, vec3(0.58, 0.72, 0.28), smoothstep(0.58, 0.85, g));
+  vec3 col = mix(gc, flowerAvg(ff.y), clamp(0.34 * ff.x, 0.0, 0.85));
+  return mix(col, gc * vec3(0.52, 0.6, 0.48), 0.85);
+}
+// Past the 3D plants the meadow is a layer of grass tufts and blooms, seen almost edge-on.
+// Each cell of a world grid holds one tuft (and in a drift, a bloom on top of it). The view ray
+// is followed from the layer's top, cell by cell, until tufts and blooms cover it. How much of
+// the pixel an element covers comes from the pixel's own size there, so far rows blend instead
+// of shimmering; the cells themselves double in size with distance, staying a few pixels wide.
+const float TUFT_LO = 0.24, TUFT_HI = 0.34, BLOOMS = 0.42;
+// four random values for a tuft (the table repeats every 256 cells, so each block of 256 reads it shifted)
+vec4 hTuft(vec2 cm) { vec2 b = floor(cm / 256.0); return hcell4(cm + b * vec2(71.0, 113.0), 71.0 + b.x * 3.0 + b.y * 7.0); }
+vec4 tufts(vec3 ro, vec2 d2, float hs, float slope, float cs, vec4 span, vec2 ff, float g, float sheen) {
+  float top = TUFT_HI + 0.3 * cs;
+  float s0 = max((ro.y - top) / slope, 0.0);   // where the ray dips into the layer (m across the ground)
+  float s1 = ro.y / slope;                     // … and where it reaches the ground
+  // Walk the grid one row at a time along the ray's main direction, testing every tuft in the row
+  // that could reach the ray. (Testing only the cells the ray passes through would leave stripes
+  // where the ray runs along a cell edge.)
+  bool zMain = abs(d2.y) >= abs(d2.x);
+  vec2 dm = zMain ? d2.yx : d2;                // the direction as (main, side)
+  vec2 om = zMain ? ro.zx : ro.xz;             // the camera as (main, side)
+  float stepM = dm.x >= 0.0 ? 1.0 : -1.0;
+  float drift = abs(dm.y / dm.x);              // sideways metres per metre along the main axis
+  float reach = 0.5 * cs * drift + 0.42 * cs;  // how far from the ray a tuft in the row may stand
+  float row = floor((om.x + dm.x * s0) / cs);
+  vec2 per = vec2(2048.0 / cs);
+  vec3 root = mix(vec3(0.13, 0.26, 0.08), vec3(0.22, 0.38, 0.11), g);
+  // the water field never changes faster than this along the ray, so over water we can leap to the shore
+  float lip = max(0.07, abs(span.w - span.z) / max(span.y - span.x, 1e-3));
+  float landAt = -1e9;   // where land was last confirmed (m across the ground): good for the next 0.4 m
+  vec4 acc = vec4(0.0);
+  for (int i = 0; i < 48 * uOne; i++) {
+    float sc = ((row + 0.5) * cs - om.x) / dm.x;   // the ray's distance across the ground at this row
+    if (sc > s1 + cs) break;
+    // is there land here? (the big lakes blend along the ray; little lakes and islets are looked up)
+    float f = clamp((sc - span.x) / max(span.y - span.x, 1e-3), 0.0, 1.0);
+    if (abs(sc - landAt) > max(cs, 0.4)) {
+      float Wr = waterAt(ro.xz + d2 * sc, mix(span.z, span.w, f), 0.0);
+      if (Wr <= 0.0) { row += stepM * max(1.0, floor(-Wr / lip * abs(dm.x) / cs)); continue; }
+      landAt = sc;
+    }
+    {
+      float wc = om.y + dm.y * sc;
+      float c0 = floor((wc - reach) / cs);
+      for (int j = 0; j < 3 * uOne; j++) {
+        float cw = c0 + float(j);
+        if (cw * cs > wc + reach) break;
+        vec2 cell = zMain ? vec2(cw, row) : vec2(row, cw);
+        vec2 cm = mod(cell, per);
+        vec4 hr = hTuft(cm);
+        float h0 = hr.x, h1 = hr.y, h2 = hr.z;
+        vec2 e = (cell + 0.1 + 0.8 * vec2(h0, h1)) * cs;
+        vec2 v = e - ro.xz;
+        float se = dot(v, d2);
+        float y = ro.y - se * slope;             // the ray's height as it passes this tuft
+        float lat = abs(d2.x * v.y - d2.y * v.x);  // how far the tuft stands beside the ray
+        float px = se * uPixAng / hs;            // the pixel's size there (m)
+        float hg = mix(TUFT_LO, TUFT_HI, h2);
+        float hv = hr.w;
+        float wg = cs * (0.24 + 0.1 * hv);
+        float q = lat / wg;
+        float cov = (1.0 - smoothstep(wg - 0.5 * px, wg + 0.5 * px, lat))
+                  * smoothstep(y - 0.5 * px, y + 0.5 * px, hg * (1.0 - 0.45 * q * q)) * step(0.0, y);
+        vec3 tip = mix(vec3(0.36, 0.58, 0.20), vec3(0.70, 0.80, 0.30), clamp(g * 0.6 + hv * 0.6 - 0.1, 0.0, 1.0));
+        tip = mix(tip, vec3(0.80, 0.86, 0.47), sheen);
+        vec3 col = mix(root, tip, smoothstep(0.0, 1.0, y / hg)) * (0.86 + 0.26 * hv);
+        // a bloom on top, as often as this drift has flowers
+        if (fract(h1 * 7.7 + h2 * 3.3) < ff.x * BLOOMS) {
+          float rf = cs * (0.15 + 0.08 * hv);
+          float cb = (1.0 - smoothstep(rf - 0.5 * px, rf + 0.5 * px, length(vec2(lat, (y - hg - rf * 0.3) * 1.2)))) * step(0.0, y);
+          float c2 = max(cov, cb);
+          col = mix(col, flowerColor(ff.y, fract(h0 * 11.3 + h1 * 2.9)) * (0.9 + 0.2 * hv), cb / max(c2, 1e-4));
+          cov = c2;
+        }
+        acc += (1.0 - acc.a) * vec4(col * cov, cov);
+      }
+      if (acc.a > 0.97) break;
+    }
+    row += stepM;
+  }
+  return acc;
+}
+// the far meadow along view ray rd, whose ground point lies t away (premultiplied colour, cover)
+vec4 farMeadow(vec3 rd, float t, float LB, vec2 ff, float g, float wind) {
+  vec3 ro = uCam;
+  float hs = length(rd.xz);
+  vec2 d2 = rd.xz / hs;
+  float slope = -rd.y / hs;
+  // the lakes where the ray dips into the layer (they're already known where it meets the ground)
+  float sA = max((ro.y - 0.6) / slope, 0.0), sB = t * hs;
+  float tA = sA / hs;
+  float LA = lakeField(ro.xz + d2 * sA, tA * uPixAng * max(1.0, tA / ro.y)) + smoothstep(150.0, 700.0, tA) * 0.1;
+  LB += smoothstep(150.0, 700.0, t) * 0.1;
+  // cells about four pixels wide where the ray enters; between two sizes, both, blended
+  float lv = max(log2(4.0 * max(tA, 1.0) * uPixAng / 0.125), 0.0);
+  float l0 = floor(lv), fb = smoothstep(0.5, 1.0, lv - l0);
+  float sheen = smoothstep(0.5, 1.6, wind) * 0.45;
+  vec4 acc = vec4(0.0);
+  for (int k = 0; k < 2 * uOne; k++) {
+    float wk = k == 0 ? 1.0 - fb : fb;
+    if (wk < 0.004) continue;
+    float cs = 0.125 * exp2(min(l0 + float(k), 5.0));
+    acc += wk * tufts(ro, d2, hs, slope, cs, vec4(sA, sB, LA, LB), ff, g, sheen);
+  }
+  return acc;
+}
+float dashes(vec2 Q, float fp) {
+  vec2 cs = vec2(1.0, 0.5);
+  vec2 c = floor(Q / cs);
+  vec2 f = Q / cs - c;
+  vec2 cm = mod(c, 2048.0 / cs);
+  float h = hcell(cm, 95.0), h2 = hcell(cm, 96.0);
+  float row = smoothstep(0.5, 0.75, wn2(Q, vec2(16.0, 2.0), 97.0));
+  float on = step(0.8, h) * row;
+  float tw = 0.55 + 0.45 * sin(uTime * (1.3 + h2 * 2.0) + h * 40.0);
+  float len = 0.26 + 0.14 * h2;
+  vec2 d = (f - 0.5) * cs;
+  float aa = fp * 0.8 + 0.01;
+  float m = (1.0 - smoothstep(len - aa, len + aa, abs(d.x))) * (1.0 - smoothstep(0.03, 0.03 + aa, abs(d.y)));
+  return m * on * tw * fadeFor(1.0, fp);
+}
+vec3 waterColor(vec3 rd, float t, float fp) {
+  vec3 ro = uCam;
+  float ny = max(-rd.y, 1e-4);
+  float t2 = (ro.y + BANK) / ny;
+  vec2 Q = ro.xz + rd.xz * t2;
+  float fq = t2 * uPixAng * max(1.0, t2 / ro.y);
+  // One loop, four jobs (so the lake function is compiled once):
+  //  0: walk the ray down past the grass edge to the water line, looking for the bank face
+  //  1: found it: bisect the bank's exact edge
+  //  2: no bank: follow the reflected ray up, looking for a far bank or islet and its grass
+  //  3: found one: bisect where the reflected ray meets it, so the reflection's edge comes out smooth
+  int mode = t < 140.0 ? 0 : (t2 < 160.0 ? 2 : 4);
+  float lo = t, hi = -1.0, rlo = 0.0, rhi = -1.0, reach = (BANK + GRASSH) / ny;
+  float sr = reach / 24.0;   // the reflected ray leaps ahead by the water field's distance to the nearest shore
+  int j = 0;
+  for (int i = 0; i < 21 * uOne; i++) {
+    if (mode == 4) break;
+    j++;
+    if (mode == 0 && j > 6) { mode = t2 < 160.0 ? 2 : 4; j = 1; if (mode == 4) break; }
+    if (mode == 1 && j > 4) break;
+    if (mode == 2 && j > 8) break;
+    if (mode == 3 && j > 3) break;
+    float s = mode == 0 ? mix(t, t2, float(j) / 6.0) : mode == 1 ? 0.5 * (lo + hi) : mode == 2 ? sr : 0.5 * (rlo + rhi);
+    vec2 at = mode >= 2 ? Q + rd.xz * s : ro.xz + rd.xz * s;
+    float Wv = waterField(at, mode >= 2 ? fq : fp);
+    bool land = Wv > 0.0;
+    if (mode == 0) { if (land) { hi = s; mode = 1; j = 0; } else lo = s; }
+    else if (mode == 1) { if (land) hi = s; else lo = s; }
+    else if (mode == 2) {
+      if (land) { rhi = s; mode = 3; j = 0; }
+      else { rlo = s; sr = s + max(-Wv / 0.07, reach / 24.0); if (sr > reach) mode = 4; }
+    }
+    else { if (land) rhi = s; else rlo = s; }
+  }
+  if (hi > 0.0) {
+    float k = clamp((ny * hi - ro.y) / BANK, 0.0, 1.0);
+    return mix(vec3(0.21, 0.34, 0.13), vec3(0.06, 0.15, 0.17), smoothstep(0.0, 0.9, k));
+  }
+  float r1 = wn(Q + vec2(uTime * 0.31, uTime * 0.13), 2.0, 91.0) - 0.5;
+  float r2 = oct(Q - vec2(uTime * 0.19, -uTime * 0.23), 0.5, 92.0, fq) - 0.5;
+  float rip = r1 * 0.75 + r2 * 0.5;
+  vec3 col = mix(vec3(0.11, 0.29, 0.44), vec3(0.10, 0.37, 0.56), smoothstep(0.3, 0.1, ny));
+  col = mix(col, vec3(0.06, 0.47, 0.64), smoothstep(0.09, 0.012, ny));
+  col = mix(col, vec3(0.12, 0.39, 0.56), smoothstep(0.012, 0.003, ny));   // distant slivers stay deep blue
+  vec3 rr = normalize(vec3(rd.x + rip * 0.04, ny * (1.0 + rip * 0.6), rd.z));
+  vec3 refl = skyWorld(rr, true);
+  col = mix(col, refl * vec3(0.72, 0.86, 0.96), 0.12 + 0.28 * smoothstep(0.25, 0.02, ny) * smoothstep(0.003, 0.012, ny));
+  col *= 1.0 + rip * 0.1;
+  // reflection of the far bank and its grass: a dark band under the land, its edges softened by the
+  // pixel's size and stirred by the ripples
+  if (rhi > 0.0) {
+    float hy = rhi * ny + rip * 0.025;          // how high above the water the reflected ray meets the land
+    float px = t2 * uPixAng;
+    float bank = 1.0 - smoothstep(BANK - px, BANK + px, hy);
+    float grass = 1.0 - smoothstep(BANK + GRASSH - px, BANK + GRASSH + px, hy);
+    col = mix(col, mix(vec3(0.08, 0.22, 0.23), vec3(0.05, 0.13, 0.20), bank), grass * 0.82);
+  }
+  // the little white dashes live in the middle distance, as in the painting, not under our feet
+  col += vec3(0.95, 0.97, 1.0) * dashes(Q, fq) * uSparkle * smoothstep(7.0, 16.0, t2) * 0.85;
+  return col;
+}
+void main() {
+#ifdef DEBUG_MAP
+  // top-down map around the camera (forward is up): lakes, flower drifts, grass
+  vec2 uv = gl_FragCoord.xy / uMapRes;
+  vec2 Pm = uCam.xz + (uv - 0.5) * vec2(uMapRes.x / uMapRes.y, -1.0) * uDebug;
+  vec2 fm = flowerField(Pm, 0.05);
+  vec3 cm = waterField(Pm, 0.05) < 0.0 ? vec3(0.1, 0.35, 0.6) : mix(vec3(0.35, 0.6, 0.2), flowerAvg(fm.y), fm.x * 0.75);
+  if (length(Pm - uCam.xz) < uDebug * 0.006) cm = vec3(1.0, 0.1, 0.1);
+  gl_FragColor = vec4(cm, 1.0);
+  return;
+#endif
+  vec3 rd = normalize(vDir);
+  vec3 col;
+  if (rd.y < -1e-4) {
+    float t = uCam.y / -rd.y;
+    vec2 P = uCam.xz + rd.xz * t;
+    float fpx = t * uPixAng;                       // footprint of one pixel across the view
+    float fp = fpx * max(1.0, t / uCam.y);         // … and along it (much longer, the ground is seen edge-on)
+    float lakes = lakeField(P, fp);
+    float W = waterAt(P, lakes, fp) + smoothstep(150.0, 700.0, t) * 0.1;
+    float e = fp * 0.03 + 1e-4;
+    float land = smoothstep(-e, e, W);
+    vec2 ff = flowerField(P, fp);
+    float g = grassTone(P, fp);
+    col = vec3(0.0);
+    if (land > 0.001) col = groundColor(ff, g);
+    if (land < 0.999) col = mix(waterColor(rd, t, fp), col, land);
+    // past the 3D plants: the layer of tufts and blooms, over land and the near shores of the water
+    // (where it meets the 3D plants, only over land: there the plants draw the shores themselves)
+    float wm = smoothstep(17.0, 25.0, t) * mix(land, 1.0, smoothstep(26.0, 40.0, t));
+    if (wm > 0.0) {
+      vec4 m = farMeadow(rd, t, lakes, ff, g, windAt(P));
+      col = m.rgb * wm + (1.0 - m.a * wm) * col;
+    }
+    col = mix(col, uHaze, 1.0 - exp(-pow(t / 1500.0, 1.25)));
+  } else {
+    col = skyWorld(rd, false);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+/* =====================================================================
+   GLSL: instanced grass blades, flowers and drifting petals
+   ===================================================================== */
+const GRASS_VERT = /* glsl */`
+${GLSL_FIELDS}
+attribute vec4 aA;   // tile position (0..1) xz, height, width
+attribute vec4 aB;   // facing, colour, bend, phase
+uniform float uTile;
+uniform vec2 uCenter;
+uniform vec2 uFade;
+uniform float uTime;
+varying vec3 vCol;
+void main() {
+  vec2 base = aA.xy * uTile;
+  vec2 xz = base + uTile * floor((uCenter - base) / uTile + 0.5);
+  vec2 toCam = uCam.xz - xz;
+  float dist = length(toCam);
+  float W = waterField(xz, 0.0);
+  float fade = (1.0 - smoothstep(uFade.x, uFade.y, dist)) * smoothstep(0.0, 0.012, W);
+  float h = mix(0.15, 0.42, aA.z * aA.z) * fade * (0.8 + 0.4 * wn(xz, 4.0, 81.0));
+  float w = mix(0.012, 0.024, aA.w) * (1.0 + dist * 0.045);
+  vec2 f = toCam / max(dist, 1e-3);
+  vec2 side = vec2(-f.y, f.x);
+  float ang = (aB.x - 0.5) * 1.7;
+  side = vec2(cos(ang) * side.x - sin(ang) * side.y, sin(ang) * side.x + cos(ang) * side.y);
+  float y = position.y;
+  float wind = windAt(xz);
+  float lean = (aB.z - 0.5) * 1.2;
+  vec2 leanDir = vec2(cos(lean) * uWindDir.x - sin(lean) * uWindDir.y, sin(lean) * uWindDir.x + cos(lean) * uWindDir.y);
+  vec2 bend = leanDir * (0.22 + 0.3 * aB.z) + uWindDir * wind * 0.95 * mix(0.7, 1.25, aB.z)
+            + vec2(sin(uTime * 1.7 + aB.w * 6.283), cos(uTime * 1.3 + aB.w * 6.283)) * 0.05;
+  float bl = length(bend);
+  bend *= (1.0 - exp(-bl * 1.2)) / (1.2 * max(bl, 1e-4)) * 1.15;   // strong gusts bow the grass, never flatten it
+  float yy = y * y;
+  vec3 p;
+  p.xz = xz + side * position.x * w * (1.0 - y) + bend * h * yy * 0.85;
+  p.y = h * y * (1.0 - 0.2 * min(dot(bend, bend), 1.5) * yy);
+  float g = grassTone(xz, 0.0);
+  vec3 root = mix(vec3(0.13, 0.26, 0.08), vec3(0.22, 0.38, 0.11), g);
+  vec3 tip = mix(vec3(0.36, 0.58, 0.20), vec3(0.70, 0.80, 0.30), clamp(g * 0.6 + aB.y * 0.6 - 0.1, 0.0, 1.0));
+  tip = mix(tip, vec3(0.80, 0.86, 0.47), smoothstep(0.5, 1.6, wind) * 0.45);
+  vCol = mix(root, tip, smoothstep(0.0, 1.0, y)) * (0.86 + 0.26 * aB.y);
+  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+}
+`;
+const GRASS_FRAG = /* glsl */`
+varying vec3 vCol;
+void main() { gl_FragColor = vec4(vCol, 1.0); }
+`;
+const FLOWER_VERT = /* glsl */`
+${GLSL_FIELDS}
+attribute vec4 aA;   // tile position xz, presence, colour
+attribute vec4 aB;   // size, height, petal shape, phase
+uniform float uTile;
+uniform vec2 uCenter;
+uniform vec2 uFade;
+uniform float uTime;
+varying vec3 vCol;
+varying vec2 vQ;
+varying vec2 vShape;
+varying float vCenter;
+void main() {
+  vec2 base = aA.xy * uTile;
+  vec2 xz = base + uTile * floor((uCenter - base) / uTile + 0.5);
+  float dist = length(uCam.xz - xz);
+  float W = waterField(xz, 0.0);
+  vec2 ff = flowerField(xz, 0.0);
+  float accent = step(0.93, fract(aA.w * 13.7));
+  // blooms gather in clumps a metre or two across, with grass between them
+  float clump = smoothstep(0.42, 0.62, wn(xz, 2.0, 71.0) * 0.6 + wn(xz, 0.5, 72.0) * 0.4);
+  float show = max(step(aA.z, ff.x * clump * 1.15), accent * step(aA.z, 0.2 * clump));
+  show *= smoothstep(0.0, 0.02, W) * (1.0 - smoothstep(uFade.x, uFade.y, dist));
+  float size = mix(0.05, 0.095, aB.x) * show;
+  float hgt = mix(0.1, 0.36, aB.y);
+  float wind = windAt(xz);
+  vec2 bend = uWindDir * (wind * 0.9 + 0.08) * 0.8 + vec2(sin(uTime * 1.9 + aB.w * 6.283), cos(uTime * 1.4 + aB.w * 6.283)) * 0.06;
+  float bl = length(bend);
+  bend *= (1.0 - exp(-bl * 1.2)) / (1.2 * max(bl, 1e-4)) * 1.15;
+  vec3 head = vec3(xz.x + bend.x * hgt * 0.7, hgt * (1.0 - 0.12 * min(dot(bend, bend), 1.5)), xz.y + bend.y * hgt * 0.7);
+  vec4 mv = viewMatrix * vec4(head, 1.0);
+  mv.xy += position.xy * size * vec2(1.0, 0.86);
+  gl_Position = projectionMatrix * mv;
+  vQ = position.xy * 2.0;
+  vShape = vec2(aB.z, fract(aB.w * 7.1));
+  vec3 c = flowerColor(ff.y, aA.w);
+  float k = fract(aA.w * 31.7);
+  vec3 acc = k < 0.3 ? vec3(0.86, 0.24, 0.27) : k < 0.55 ? vec3(0.40, 0.44, 0.84) : k < 0.8 ? vec3(0.96, 0.84, 0.28) : vec3(0.97, 0.58, 0.24);
+  vCol = mix(c, acc, accent);
+  vCenter = step(0.55, fract(aA.w * 3.3));
+}
+`;
+const FLOWER_FRAG = /* glsl */`
+varying vec3 vCol;
+varying vec2 vQ;
+varying vec2 vShape;
+varying float vCenter;
+void main() {
+  float r = length(vQ);
+  float a = atan(vQ.y, vQ.x);
+  float edge = 0.84 + 0.07 * sin(a * 5.0 + vShape.x * 6.283) + 0.07 * sin(a * 3.0 - vShape.y * 9.0) + 0.04 * sin(a * 2.0 + vShape.y * 5.0);
+  if (r > edge) discard;
+  vec3 c = vCol * (0.82 + 0.26 * smoothstep(-0.7, 0.8, vQ.y - vQ.x * 0.35));
+  c = mix(c, min(vCol * 1.25, vec3(1.0)), smoothstep(0.32, 0.0, length(vQ - vec2(-0.2, 0.25))) * 0.35);
+  c = mix(c, vec3(0.96, 0.78, 0.30), smoothstep(0.24, 0.1, r) * vCenter * 0.8);
+  c *= 1.0 - 0.18 * smoothstep(edge - 0.18, edge, r);
+  gl_FragColor = vec4(c, 1.0);
+}
+`;
+const PETAL_VERT = /* glsl */`
+attribute vec4 aA;   // box position, size
+attribute vec4 aB;   // drift, spin, phase, show
+uniform vec3 uCam;
+uniform vec2 uWindDir;
+uniform vec2 uPetalOff;     // how far the wind has carried the petals (m)
+uniform vec3 uPetalC;       // the middle of the petal box, ahead of us
+uniform float uTime;
+uniform float uShow;
+varying vec2 vQ;
+varying vec3 vCol;
+void main() {
+  vec3 box = vec3(22.0, 4.5, 22.0);
+  vec3 c = vec3(uPetalC.x, uCam.y, uPetalC.z);
+  vec3 p = aA.xyz * box;
+  p.xz += uPetalOff * (0.75 + 0.5 * aB.x);
+  p.y -= uTime * (0.08 + 0.12 * aB.y) - sin(uTime * 0.9 + aB.z * 6.283) * 0.35;
+  p += vec3(sin(uTime * 0.7 + aB.z * 9.0), 0.0, cos(uTime * 0.6 + aB.z * 7.0)) * 0.6;
+  vec3 rel = mod(p - c + box * 0.5, box) - box * 0.5;
+  vec3 world = c + rel;
+  world.y = rel.y + box.y * 0.5 + 0.1;
+  vec3 e = abs(rel) / (box * 0.5);
+  float edge = (1.0 - smoothstep(0.8, 1.0, e.x)) * (1.0 - smoothstep(0.8, 1.0, e.z)) * (1.0 - smoothstep(0.85, 1.0, e.y));
+  float on = smoothstep(aB.w, aB.w + 0.05, uShow);
+  float size = mix(0.028, 0.05, aA.w) * edge * on;
+  float spin = uTime * (1.0 + 2.5 * aB.y) + aB.z * 6.283;
+  float flip = 0.25 + 0.75 * abs(cos(uTime * (1.2 + aB.x * 2.0) + aB.z * 4.0));
+  vec2 q = position.xy * vec2(1.0, 0.6 * flip);
+  q = vec2(cos(spin) * q.x - sin(spin) * q.y, sin(spin) * q.x + cos(spin) * q.y);
+  vec4 mv = viewMatrix * vec4(world, 1.0);
+  mv.xy += q * size;
+  gl_Position = projectionMatrix * mv;
+  vQ = position.xy * 2.0;
+  vCol = mix(vec3(0.97, 0.70, 0.76), vec3(0.99, 0.95, 0.94), step(0.6, fract(aB.z * 17.0))) * (0.85 + 0.25 * flip);
+}
+`;
+const PETAL_FRAG = /* glsl */`
+varying vec2 vQ;
+varying vec3 vCol;
+void main() {
+  if (dot(vQ, vQ) > 1.0) discard;
+  gl_FragColor = vec4(vCol, 1.0);
+}
+`;
+const FINAL_FRAG = /* glsl */`
+uniform sampler2D tScene;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uBreath;
+varying vec2 vUv;
+float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+void main() {
+  vec3 c = texture2D(tScene, vUv).rgb;
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(l), c, 1.05);
+  c *= 1.0 + uBreath * 0.045;
+  vec2 d = (vUv - 0.5) * vec2(1.0, 0.85);
+  c *= 1.0 - 0.22 * smoothstep(0.12, 0.42, dot(d, d));
+  c += (hash(floor(vUv * uRes) + fract(uTime * 3.7) * 311.0) - 0.5) * 0.022;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}
+`;
+
+/* =====================================================================
+   Geometry builders
+   ===================================================================== */
+function bladeGeometry(count, seed) {
+  const g = new THREE.InstancedBufferGeometry();
+  const rows = [0, 0.3, 0.58, 0.82];
+  const pos = [];
+  for (const y of rows) pos.push(-0.5, y, 0, 0.5, y, 0);
+  pos.push(0, 1, 0);
+  const idx = [];
+  for (let r = 0; r < rows.length - 1; r++) { const a = r * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const last = (rows.length - 1) * 2;
+  idx.push(last, last + 1, rows.length * 2);
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  addScatter(g, count, seed);
+  return g;
+}
+function quadGeometry(count, seed) {
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  addScatter(g, count, seed);
+  return g;
+}
+// jittered-grid scatter: even coverage without visible rows
+function addScatter(g, count, seed) {
+  const rng = mulberry32(seed);
+  const n = Math.ceil(Math.sqrt(count));
+  const A = new Float32Array(count * 4), B = new Float32Array(count * 4);
+  const order = Array.from({ length: n * n }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  for (let i = 0; i < count; i++) {
+    const cell = order[i], cx = cell % n, cy = Math.floor(cell / n);
+    A[i * 4] = (cx + rng()) / n; A[i * 4 + 1] = (cy + rng()) / n; A[i * 4 + 2] = rng(); A[i * 4 + 3] = rng();
+    B[i * 4] = rng(); B[i * 4 + 1] = rng(); B[i * 4 + 2] = rng(); B[i * 4 + 3] = rng();
+  }
+  g.setAttribute('aA', new THREE.InstancedBufferAttribute(A, 4));
+  g.setAttribute('aB', new THREE.InstancedBufferAttribute(B, 4));
+  g.instanceCount = count;
+}
+
+/* =====================================================================
+   Song analysis: beats, loudness per beat, band envelopes
+   (the same analysis as europe.html; the default song ships pre-analysed)
+   ===================================================================== */
+function makeFFT(N) {
+  const bits = Math.round(Math.log2(N)), rev = new Uint32Array(N);
+  for (let i = 0; i < N; i++) { let r = 0; for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b); rev[i] = r; }
+  const cs = new Float32Array(N / 2), sn = new Float32Array(N / 2);
+  for (let i = 0; i < N / 2; i++) { cs[i] = Math.cos(-TAU * i / N); sn[i] = Math.sin(-TAU * i / N); }
+  return (re, im) => {
+    for (let i = 0; i < N; i++) { const j = rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (let size = 2; size <= N; size <<= 1) {
+      const half = size >> 1, step = N / size;
+      for (let i = 0; i < N; i += size) {
+        for (let j = 0, k = 0; j < half; j++, k += step) {
+          const a = i + j, b = a + half;
+          const tr = re[b] * cs[k] - im[b] * sn[k], ti = re[b] * sn[k] + im[b] * cs[k];
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        }
+      }
+    }
+  };
+}
+const ENV_RATE = 30; // envelope samples per second
+async function analyzeAudio(buffer, progress) {
+  const sr0 = buffer.sampleRate, nch = buffer.numberOfChannels;
+  const dec = Math.max(1, Math.round(sr0 / 22050)), sr = sr0 / dec;
+  const n = Math.floor(buffer.length / dec);
+  const x = new Float32Array(n);
+  for (let c = 0; c < nch; c++) {
+    const d = buffer.getChannelData(c), k = 1 / (dec * nch);
+    for (let i = 0; i < n; i++) { let s = 0; for (let q = 0; q < dec; q++) s += d[i * dec + q]; x[i] += s * k; }
+  }
+  const N = 1024, H = 256, nf = Math.floor(n / H) + 1, fps = sr / H;
+  const fft = makeFFT(N), win = new Float32Array(N);
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(TAU * i / N);
+  const bin = (hz) => clamp(Math.round(hz * N / sr), 1, N / 2 - 1);
+  const NB = 36, edges = [];
+  for (let b = 0; b <= NB; b++) edges.push(bin(40 * Math.pow(8000 / 40, b / NB)));
+  const bands = [[bin(30), bin(150)], [bin(150), bin(2000)], [bin(2000), bin(9000)]];
+  const onset = new Float32Array(nf), rms = new Float32Array(nf);
+  const eb = [new Float32Array(nf), new Float32Array(nf), new Float32Array(nf)];
+  let prev = new Float32Array(NB), cur = new Float32Array(NB);
+  const re = new Float32Array(N), im = new Float32Array(N), pw = new Float32Array(N / 2);
+  for (let f = 0; f < nf; f++) {
+    const c0 = f * H - N / 2;
+    for (let i = 0; i < N; i++) { const j = c0 + i; re[i] = (j >= 0 && j < n ? x[j] : 0) * win[i]; im[i] = 0; }
+    let ss = 0, cnt = 0;
+    for (let j = f * H - H / 2; j < f * H + H / 2; j++) if (j >= 0 && j < n) { ss += x[j] * x[j]; cnt++; }
+    rms[f] = Math.sqrt(ss / Math.max(1, cnt));
+    fft(re, im);
+    for (let k = 0; k < N / 2; k++) pw[k] = re[k] * re[k] + im[k] * im[k];
+    let flux = 0;
+    for (let b = 0; b < NB; b++) {
+      let e = 0; const k1 = Math.max(edges[b] + 1, edges[b + 1]);
+      for (let k = edges[b]; k < k1; k++) e += pw[k];
+      cur[b] = Math.log(1 + 100 * e / (k1 - edges[b]));
+      if (f > 0) { const d = cur[b] - prev[b]; if (d > 0) flux += d; }
+    }
+    onset[f] = flux; const t = prev; prev = cur; cur = t;
+    for (let q = 0; q < 3; q++) { let e = 0; for (let k = bands[q][0]; k < bands[q][1]; k++) e += pw[k]; eb[q][f] = e; }
+    if ((f & 1023) === 0) { if (progress) progress(0.8 * f / nf); await nextFrame(); }
+  }
+  const duration = buffer.duration;
+
+  // ---- tempo: autocorrelation of the onset envelope, with a gentle preference for ~120 BPM ----
+  let mean = 0; for (let f = 0; f < nf; f++) mean += onset[f]; mean /= nf;
+  const oc = new Float32Array(nf); for (let f = 0; f < nf; f++) oc[f] = onset[f] - mean;
+  const minLag = Math.floor(fps * 60 / 200), maxLag = Math.ceil(fps * 60 / 55);
+  const ac = new Float32Array(maxLag + 2);
+  for (let L = minLag - 1; L <= maxLag + 1; L++) { let s = 0; for (let t = 0; t + L < nf; t++) s += oc[t] * oc[t + L]; ac[L] = s / (nf - L); }
+  let best = minLag, bestS = -Infinity;
+  for (let L = minLag; L <= maxLag; L++) {
+    const bpm = 60 * fps / L, w = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120), 2));
+    if (ac[L] * w > bestS) { bestS = ac[L] * w; best = L; }
+  }
+  const a0 = ac[best - 1], a1 = ac[best], a2 = ac[best + 1], den = a0 - 2 * a1 + a2;
+  let period = best + (den ? clamp(0.5 * (a0 - a2) / den, -0.5, 0.5) : 0);
+  let bpm = 60 * fps / period;
+  while (bpm > 165) { bpm /= 2; period *= 2; }
+  while (bpm < 70) { bpm *= 2; period /= 2; }
+  if (progress) progress(0.85); await nextFrame();
+
+  // ---- beats: dynamic programming over the onset envelope (Ellis 2007) ----
+  let sd = 0; for (let f = 0; f < nf; f++) sd += oc[f] * oc[f]; sd = Math.sqrt(sd / nf) || 1;
+  const on = new Float32Array(nf); for (let f = 0; f < nf; f++) on[f] = onset[f] / sd;
+  const gw = Math.round(period), gs = period / 32, gk = [];
+  for (let i = -gw; i <= gw; i++) gk.push(Math.exp(-0.5 * (i / gs) * (i / gs)));
+  const ls = new Float32Array(nf);
+  for (let t = 0; t < nf; t++) { let s = 0; for (let i = -gw; i <= gw; i++) { const j = t + i; if (j >= 0 && j < nf) s += gk[i + gw] * on[j]; } ls[t] = s; }
+  const cum = new Float32Array(nf), back = new Int32Array(nf).fill(-1);
+  const tight = 200, lo = Math.round(period / 2), hi = Math.round(period * 2);
+  for (let t = 0; t < nf; t++) {
+    let bv = -Infinity, bi = -1;
+    for (let tau = Math.max(0, t - hi); tau <= t - lo; tau++) {
+      const r = Math.log((t - tau) / period), v = cum[tau] - tight * r * r;
+      if (v > bv) { bv = v; bi = tau; }
+    }
+    cum[t] = ls[t] + (bi >= 0 ? Math.max(0, bv) : 0); back[t] = bi;
+  }
+  const maxima = []; for (let t = 1; t < nf - 1; t++) if (cum[t] > cum[t - 1] && cum[t] >= cum[t + 1]) maxima.push(t);
+  const med = maxima.map((t) => cum[t]).sort((p, q) => p - q)[maxima.length >> 1] || 0;
+  let last = nf - 1; for (let i = maxima.length - 1; i >= 0; i--) if (cum[maxima[i]] >= 0.5 * med) { last = maxima[i]; break; }
+  let frames = []; for (let t = last; t >= 0; t = back[t]) { frames.push(t); if (back[t] < 0) break; }
+  frames.reverse();
+  // trim weak beats at both ends
+  let rmsLs = 0; for (const t of frames) rmsLs += ls[t] * ls[t]; rmsLs = Math.sqrt(rmsLs / Math.max(1, frames.length));
+  while (frames.length && ls[frames[0]] < 0.5 * rmsLs) frames.shift();
+  while (frames.length && ls[frames[frames.length - 1]] < 0.5 * rmsLs) frames.pop();
+  const beats = frames.map((t) => t * H / sr);
+  if (beats.length > 8) { // the tempo the beats actually keep
+    const ibi = []; for (let i = 1; i < beats.length; i++) ibi.push(beats[i] - beats[i - 1]);
+    ibi.sort((p, q) => p - q); bpm = 60 / ibi[ibi.length >> 1];
+  }
+
+  // ---- loudness per beat (dB) ----
+  const beatDb = beats.map((t0, i) => {
+    const t1 = i + 1 < beats.length ? beats[i + 1] : t0 + 60 / bpm;
+    const f0 = Math.round(t0 * fps), f1 = Math.max(f0 + 1, Math.round(t1 * fps));
+    let s = 0, c = 0; for (let f = f0; f < f1 && f < nf; f++) { s += rms[f] * rms[f]; c++; }
+    return 10 * Math.log10(s / Math.max(1, c) + 1e-10);
+  });
+
+  // ---- envelopes at ENV_RATE: low / mid / high bands and overall level, 0..255 ----
+  const ne = Math.ceil(duration * ENV_RATE);
+  const toEnv = (src) => {
+    const raw = new Float32Array(ne);
+    for (let k = 0; k < ne; k++) {
+      const f0 = Math.floor(k * fps / ENV_RATE), f1 = Math.max(f0 + 1, Math.floor((k + 1) * fps / ENV_RATE));
+      let m = 0; for (let f = f0; f < f1 && f < nf; f++) m = Math.max(m, src[f]);
+      raw[k] = 10 * Math.log10(m + 1e-12);
+    }
+    const sorted = Float32Array.from(raw).sort(), top = sorted[Math.floor(sorted.length * 0.98)];
+    const out = new Uint8Array(ne);
+    for (let k = 0; k < ne; k++) out[k] = Math.round(255 * clamp((raw[k] - (top - 30)) / 30, 0, 1));
+    return out;
+  };
+  const rms2 = rms.map((v) => v * v);
+  const env = { rate: ENV_RATE, lo: toEnv(eb[0]), mi: toEnv(eb[1]), hi: toEnv(eb[2]), lev: toEnv(rms2) };
+  if (progress) progress(1);
+  return { duration, bpm, beats, beatDb, env };
+}
+// Compact text form of an analysis (how the default song is shipped inside this page)
+function packAnalysis(an) {
+  const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
+  return JSON.stringify({
+    duration: +an.duration.toFixed(3), bpm: +an.bpm.toFixed(3),
+    beats: an.beats.map((t) => Math.round(t * 1000)), beatDb: an.beatDb.map((d) => Math.round(d * 10)),
+    env: [an.env.lo, an.env.mi, an.env.hi, an.env.lev].map(b64),
+  });
+}
+function unpackAnalysis(p) {
+  const u8 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const [lo, mi, hi, lev] = p.env.map(u8);
+  return { duration: p.duration, bpm: p.bpm, beats: p.beats.map((v) => v / 1000), beatDb: p.beatDb.map((v) => v / 10), env: { rate: ENV_RATE, lo, mi, hi, lev } };
+}
+// No song at all (it failed to load): walk to a silent 96 BPM clock
+function silentAnalysis(duration = 600, bpm = 96) {
+  const beats = []; for (let t = 0.5; t < duration; t += 60 / bpm) beats.push(t);
+  const ne = Math.ceil(duration * ENV_RATE), flat = new Uint8Array(ne).fill(150);
+  return { duration, bpm, beats, beatDb: beats.map(() => -12), env: { rate: ENV_RATE, lo: flat, mi: flat, hi: flat, lev: flat }, silent: true };
+}
+
+
+/* =====================================================================
+   Director: how the meadow moves through a song
+   Wind, gusts, petals and the glide are all read from the song's analysis
+   at the current song time, so a seek or a test render always lands on
+   the same moment. Each bar of the music sends one gust front across the
+   meadow, timed to cross the middle of the view on the bar's first beat;
+   a big entrance (the music bursting in, often after a held breath)
+   sends a wide wave and a burst of petals.
+   ===================================================================== */
+const GUST_FROM = -22, GUST_AT = 4;   // a front enters at the left edge of view and reaches the middle 4 m along the wind
+const END_SPEED = 0.18;               // the glide when a song has ended (m/s)
+function upperBound(arr, x) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo; }
+function buildDirector(an) {
+  const R = 20, E = an.env, er = E.rate, dur = an.duration;
+  const n = Math.ceil(dur * R) + 2;
+  // overall level, 0..1 per 1/R s
+  const lev = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const k0 = Math.floor((i * er) / R), k1 = Math.max(k0 + 1, Math.floor(((i + 1) * er) / R));
+    let s = 0, c = 0; for (let k = k0; k < k1 && k < E.lev.length; k++) { s += E.lev[k]; c++; }
+    lev[i] = c ? s / c / 255 : 0;
+  }
+  // the body of the song: from the first to the last moment it is clearly playing
+  let i0 = 0, i1 = n - 1;
+  while (i0 < n - 1 && lev[i0] < 0.15) i0++;
+  while (i1 > i0 && lev[i1] < 0.15) i1--;
+  const tStart = i0 / R, tEnd = (i1 + 1) / R;
+  // levels scaled to this song's own range
+  const body = Float32Array.from(lev.subarray(i0, i1 + 1)).sort();
+  const pLo = body[Math.floor(body.length * 0.08)] * 0.7, pHi = body[Math.floor(body.length * 0.97)];
+  const norm = (v) => clamp((v - pLo) / Math.max(0.05, pHi - pLo), 0, 1);
+  const pre = new Float64Array(n + 1); for (let i = 0; i < n; i++) pre[i + 1] = pre[i] + lev[i];
+  const box = (half, scale = norm) => {
+    const h = Math.round(half * R), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const a = Math.max(0, i - h), b = Math.min(n, i + h + 1); out[i] = scale((pre[b] - pre[a]) / (b - a)); }
+    return out;
+  };
+  const drive = box(0.15), held = box(0.6), energy = box(1.6);
+  const quiet = box(0.15, (v) => (v < 0.08 ? 1 : 0));   // 1 where the music has (all but) stopped
+  const curve = (arr, t) => { const f = clamp(t * R, 0, n - 1.001), i = Math.floor(f), u = f - i; return arr[i] + (arr[i + 1] - arr[i]) * u; };
+  const env = (arr, t) => { const f = clamp(t * er, 0, arr.length - 1.001), i = Math.floor(f), u = f - i; return (arr[i] + (arr[i + 1] - arr[i]) * u) / 255; };
+
+  // ---- entrances: the music leaps from quiet to loud, strongest straight out of a held breath ----
+  const swells = [];
+  {
+    const back = Math.round(1.2 * R), fwd = Math.round(0.9 * R), cand = [];
+    for (let i = i0 + Math.round(1.5 * R); i < i1 - fwd; i++) {   // the first notes wake the meadow gently instead
+      let lo = 1, at = i; for (let j = Math.max(0, i - back); j <= i; j++) if (drive[j] < lo) { lo = drive[j]; at = j; }
+      let after = 0; for (let j = i + 1; j <= i + fwd; j++) after += drive[j]; after /= fwd;
+      if (lo < 0.35 && after > 0.42 && after - lo > 0.35) cand.push({ i, at, lo, after, jump: after - lo });
+    }
+    cand.sort((p, q) => q.jump - p.jump);
+    const keep = [];
+    for (const c of cand) if (!keep.some((k) => Math.abs(k.i - c.i) < 3 * R)) keep.push(c);
+    for (const c of keep) {
+      // the moment the level crosses halfway up the leap, read at the envelope's own rate
+      const half = c.lo + 0.5 * c.jump;
+      let t = c.i / R;
+      for (let k = Math.floor((c.at / R) * er); k < (c.i / R + 0.9) * er && k < E.lev.length; k++) if (norm(E.lev[k] / 255) >= half) { t = k / er; break; }
+      // how long the music held its breath (stopped) in the two seconds before
+      let held0 = 0;
+      for (let k = Math.max(i0, Math.round((t - 2) * R)); k < Math.round(t * R); k++) held0 += quiet[k];
+      const breath = smooth01((held0 / R - 0.15) / 0.6);
+      const s = 0.45 * clamp((c.jump - 0.3) / 0.45, 0, 1) + 0.3 * clamp((c.after - 0.5) / 0.35, 0, 1) + 0.65 * breath;
+      swells.push({ t, s: clamp(s, 0.15, 1.25), breath });
+    }
+    swells.sort((p, q) => p.t - q.t);
+  }
+
+  // ---- bars: which beat of each bar carries the bass (the "one"), followed through the song ----
+  const B = an.beats, nb = B.length;
+  const acc = new Float32Array(nb);
+  for (let i = 0; i < nb; i++) {
+    let a = 0, b = 0;
+    for (let k = -5; k <= -1; k++) a = Math.max(a, env(E.lo, B[i] + k * 0.03));
+    for (let k = 0; k <= 4; k++) b = Math.max(b, env(E.lo, B[i] + k * 0.03));
+    acc[i] = Math.max(0, b - a);
+  }
+  const meterScore = (m) => {
+    let s = 0, c = 0;
+    for (let i = 0; i + 8 * m <= nb; i += m) {
+      const ph = new Array(m).fill(0); for (let j = i; j < i + 8 * m; j++) ph[j % m] += acc[j];
+      const tot = ph.reduce((p, q) => p + q, 0);
+      if (tot > 0) { s += (Math.max(...ph) / tot - 1 / m) / (1 - 1 / m); c++; }
+    }
+    return c ? s / c : 0;
+  };
+  const meter = meterScore(3) > meterScore(4) * 1.05 ? 3 : 4;
+  const per = meter === 3 ? 3 : 2;   // beats between gusts: every bar of a waltz, every half bar of a 4/4 song
+  const bars = [];
+  {
+    let cur = -1;
+    for (let i = 0; i < nb; i++) {
+      const a = Math.max(0, i - 4 * per), b = Math.min(nb, i + 4 * per + 1);
+      const ph = new Array(per).fill(0); for (let j = a; j < b; j++) ph[j % per] += acc[j];
+      let best = 0; for (let p = 1; p < per; p++) if (ph[p] > ph[best]) best = p;
+      if (cur < 0 || ph[best] > ph[cur] * 1.3 + 1e-3) cur = best;
+      const t = B[i];
+      if (i % per === cur && t > tStart - 0.2 && t < tEnd && (!bars.length || i - bars[bars.length - 1].i >= 2)) bars.push({ i, t });
+    }
+    const sorted = Float32Array.from(acc).sort(), ref = sorted[Math.floor(nb * 0.9)] || 1;
+    for (const b of bars) b.s = clamp(0.15 + 0.95 * curve(drive, b.t + 0.1) + 0.25 * clamp(acc[b.i] / ref, 0, 1.5), 0, 1.35);
+  }
+  const barT = bars.map((b) => b.t);
+
+  // ---- gust fronts: one per bar; an entrance replaces its bar's gust with a wide wave ----
+  const gusts = [];
+  for (const b of bars) if (!swells.some((s) => Math.abs(s.t - b.t) < 0.45)) gusts.push({ t: b.t, s: b.s, v: 15 + 6 * b.s, w: 3.5 + 3 * b.s, life: 5 });
+  for (const s of swells) gusts.push({ t: s.t, s: 1.3 + 0.7 * s.s, v: 26, w: 9 + 4 * s.s, life: 7 });
+  gusts.sort((p, q) => p.t - q.t);
+  const gustT = gusts.map((g) => g.t);
+  const live = [];
+  // the six strongest fronts at song time t, written into out[] as { x, a, w, v }
+  function gustsAt(t, out) {
+    live.length = 0;
+    for (let k = upperBound(gustT, t - 8), e = upperBound(gustT, t + 2); k < e; k++) {
+      const g = gusts[k], age = t - g.t, lead = (GUST_AT - GUST_FROM) / g.v;
+      if (age < -lead) continue;
+      const a = g.s * smooth01((age + lead) / 0.5) * (1 - smooth01((age - (g.life - 2)) / 2)) * Math.exp(-0.12 * Math.max(0, age));
+      if (a > 0.003) live.push({ x: GUST_AT + g.v * age, a, w: g.w, v: g.v });
+    }
+    live.sort((p, q) => q.a - p.a);
+    for (let k = 0; k < out.length; k++) {
+      const g = live[k], o = out[k];
+      if (g) { o.x = g.x; o.a = g.a; o.w = g.w; o.v = g.v; } else { o.x = -999; o.a = 0; }
+    }
+  }
+  const barPulse = (t) => { const k = upperBound(barT, t) - 1; return k < 0 ? 0 : bars[k].s * Math.exp(-(t - bars[k].t) * 4.5); };
+  const swellT = swells.map((s) => s.t);
+  const swellPulse = (t) => {
+    let p = 0;
+    for (let k = Math.max(0, upperBound(swellT, t) - 3); k < swells.length && swells[k].t < t + 0.1; k++) {
+      const s = swells[k], age = t - s.t;
+      p = Math.max(p, s.s * smooth01((age + 0.05) / 0.12) * Math.exp(-Math.max(0, age) / 2.8));
+    }
+    return p;
+  };
+  // everything the meadow needs at song time t (before the Wind and Glide settings)
+  const frame = { drive: 0, energy: 0, hush: 0, bar: 0, swell: 0, speed: 0, windAmp: 0, windRate: 0, cloudRate: 0, petalShow: 0, petalRate: 0, sparkle: 0, breath: 0 };
+  function at(t) {
+    const f = frame;
+    f.drive = curve(drive, t); f.energy = curve(energy, t);
+    f.hush = 1 - smooth01(curve(held, t) / 0.25);
+    f.bar = barPulse(t);
+    const sw = (f.swell = swellPulse(t));
+    let v = (0.45 + 2.1 * Math.pow(f.energy, 1.4)) * (1 - 0.65 * f.hush) + 1.2 * sw;
+    if (t > tEnd - 4) v = lerp(v, END_SPEED, smooth01((t - (tEnd - 4)) / 4));
+    f.speed = v;
+    f.windAmp = 0.12 + 0.95 * Math.pow(f.drive, 1.1);
+    f.windRate = 1.5 + 4.5 * f.energy;
+    f.cloudRate = 0.6 + 1.8 * f.energy + 2.5 * sw;
+    f.petalShow = 0.1 + 0.4 * f.energy + 0.75 * sw;
+    f.petalRate = 1.2 + 3.5 * (0.3 + f.energy + sw);
+    f.sparkle = 0.4 + 0.8 * env(E.hi, t) + 0.3 * f.bar;
+    f.breath = 0.5 * f.bar + sw;
+    return f;
+  }
+  return { an, tStart, tEnd, meter, per, bars, swells, gusts, at, gustsAt, swellPulse, curves: { drive, held, energy, R } };
+}
+
+/* =====================================================================
+   Default song: sits next to this page and starts on the first click
+   ===================================================================== */
+const DEFAULT_TRACK = { url: 'Howl\'s Moving Castle [OST - Theme Song].mp3', name: 'Howl’s Moving Castle – Theme Song' };
+// The default song's analysis, written in by tools/bake.mjs, so the page also works opened straight from disk
+const BAKED = {"duration":309.29,"bpm":161.499,"beats":[93,464,848,1242,1625,2020,2380,2752,3135,3495,3855,4226,4609,5004,5364,5747,6095,6444,6803,7175,7558,7953,8359,8777,9160,9520,9903,10263,10623,11006,11378,11761,12156,12539,12852,13166,13537,13909,14303,14663,15012,15395,15778,16161,16533,16904,17241,17589,17949,18321,18669,19040,19412,19783,20155,20538,20898,21246,21595,21943,22314,22698,23069,23464,23859,24242,24636,25008,25368,25728,26134,26529,26947,27341,27690,28085,28502,28932,29327,29733,30128,30523,30871,31242,31626,32009,32345,32705,33065,33437,33808,34168,34540,34923,35306,35689,36072,36432,36792,37187,37593,37988,38383,38777,39160,39520,39903,40287,40647,41018,41390,41761,42133,42504,42887,43259,43642,44013,44397,44780,45163,45558,45941,46312,46684,47044,47415,47798,48193,48588,48982,49354,49726,50085,50457,50840,51212,51572,51943,52315,52674,53034,53394,53766,54149,54532,54904,55287,55658,56030,56401,56761,57133,57504,57876,58259,58619,58990,59350,59699,60070,60442,60790,61161,61521,61881,62241,62624,62984,63344,63704,64075,64447,64819,65178,65550,65910,66281,66641,67013,67373,67733,68093,68464,68812,69195,69567,69939,70322,70693,71065,71448,71819,72214,72586,72969,73363,73747,74130,74513,74896,75256,75639,76011,76382,76765,77160,77543,77915,78286,78681,79064,79435,79795,80167,80538,80898,81281,81665,82059,82466,82860,83244,83603,83963,84312,84672,85043,85415,85775,86146,86541,86912,87272,87609,87969,88340,88689,89060,89432,89792,90151,90546,90906,91254,91614,91974,92357,92752,93124,93484,93867,94227,94598,94970,95341,95713,96096,96456,96827,97210,97593,97965,98337,98708,99056,99428,99811,100171,100542,100902,101274,101669,102040,102400,102772,103143,103503,103863,104223,104571,104954,105326,105697,106069,106440,106800,107160,107520,107903,108263,108623,108994,109366,109714,110097,110469,110840,111224,111595,111967,112338,112698,113058,113429,113813,114184,114521,114892,115252,115647,116007,116367,116738,117121,117481,117864,118248,118619,118967,119327,119687,120047,120407,120767,121139,121510,121882,122241,122613,122961,123333,123716,124099,124471,124854,125237,125620,125991,126363,126769,127164,127547,127930,128302,128673,129033,129416,129811,130194,130589,130961,131355,131750,132122,132481,132865,133248,133642,134037,134397,134780,135175,135546,135930,136290,136661,137021,137381,137764,138147,138519,138867,139238,139633,140016,140399,140783,141142,141526,141897,142280,142652,143012,143395,143778,144149,144509,144893,145252,145624,146019,146390,146773,147145,147516,147876,148259,148643,149014,149397,149757,150140,150523,150906,151301,151661,152033,152404,152764,153124,153472,153821,154192,154564,154970,155353,155725,156096,156479,156851,157234,157582,157931,158325,158662,159022,159393,159765,160136,160485,160856,161228,161599,161971,162342,162702,163062,163422,163782,164153,164525,164920,165291,165663,166011,166371,166731,167091,167451,167834,168205,168554,168925,169262,169633,170017,170400,170771,171154,171549,171944,172327,172710,173058,173418,173778,174150,174521,174881,175264,175647,176007,176390,176762,177157,177540,177911,178294,178689,179084,179467,179873,180222,180547,180953,181313,181673,182033,182451,182787,183124,183542,183914,184308,184668,185063,185458,185841,186201,186584,186955,187362,187768,188186,188592,189010,189440,189812,190183,190566,190961,191356,191797,192203,192621,193039,193480,193898,194328,194746,195140,195477,195779,196162,196557,196975,197381,197799,198194,198531,198867,199216,199587,199970,200342,200713,201085,201468,201839,202223,202629,203012,203372,203743,204115,204487,204893,205299,205682,206065,206437,206820,207203,207610,207970,208341,208713,209096,209467,209827,210175,210524,210884,211244,211603,211987,212358,212730,213113,213461,213809,214181,214552,214936,215307,215667,216027,216387,216735,217107,217466,217815,218210,218616,219034,219452,219858,220276,220706,221124,221495,221855,222215,222575,222935,223330,223724,224107,224491,224850,225210,225570,225965,226337,226696,227068,227451,227823,228194,228554,228926,229285,229657,230017,230377,230737,231120,231468,231828,232200,232571,232943,233291,233639,234011,234382,234742,235114,235474,235845,236228,236600,236971,237343,237714,238086,238457,238840,239247,239642,240036,240443,240861,241255,241638,242010,242393,242776,243159,243554,243937,244309,244703,245110,245505,245876,246259,246642,247037,247443,247803,248175,248535,248906,249289,249661,250009,250381,250764,251124,251507,251855,252204,252563,252923,253283,253632,254003,254351,254676,255025,255385,255756,256093,256453,256813,257184,257544,257904,258276,258635,258972,259355,259704,260040,260400,260748,261108,261468,261840,262200,262571,262931,263291,263639,264011,264359,264707,265067,265427,265787,266136,266484,266879,267273,267668,268051,268423,268783,269154,269514,269862,270211,270582,270965,271337,271708,272057,272428,272788,273148,273496,273845,274204,274553,274924,275296,275656,276016,276387,276747,277107,277467,277827,278210,278558,278930,279301,279661,280033,280393,280752,281112,281484,281844,282215,282587,282958,283330,283713,284061,284433,284804,285187,285559,285942,286314,286708,287115,287486,287881,288253,288601,288972,289355,289727,290099,290470,290818,291201,291596,291968,292351,292734,293117,293500,293872,294220,294568,294928,295311,295683,296054,296414,296774,297146,297506,297900,298272,298643,299050,299421,299781,300188,300571,300931,301291,301650,302022,302405,302777,303137,303496,303856,304251,304623,304982,305366,305760,306132,306515,306875,307235,307618,308001,308373],"beatDb":[-382,-402,-435,-977,-501,-271,-242,-211,-192,-213,-180,-181,-192,-230,-213,-203,-157,-166,-167,-251,-319,-342,-191,-213,-224,-239,-225,-244,-262,-285,-299,-310,-318,-209,-272,-245,-216,-192,-163,-202,-166,-174,-175,-147,-149,-162,-179,-178,-210,-184,-228,-286,-250,-233,-211,-172,-157,-177,-169,-146,-169,-156,-142,-173,-189,-207,-203,-257,-280,-261,-227,-230,-190,-145,-190,-179,-178,-152,-149,-166,-202,-175,-194,-188,-238,-171,-195,-227,-230,-174,-190,-178,-200,-188,-191,-164,-205,-241,-197,-197,-174,-200,-228,-121,-161,-182,-180,-183,-181,-180,-191,-193,-198,-205,-214,-188,-209,-198,-197,-194,-212,-212,-222,-219,-222,-268,-287,-309,-298,-333,-364,-404,-431,-454,-452,-184,-199,-199,-188,-199,-205,-130,-161,-198,-180,-178,-161,-161,-180,-188,-165,-159,-168,-155,-157,-174,-181,-173,-185,-184,-179,-191,-180,-167,-168,-168,-167,-195,-181,-164,-166,-172,-170,-191,-190,-165,-179,-174,-169,-187,-163,-162,-172,-204,-170,-156,-173,-179,-199,-158,-165,-177,-153,-120,-108,-125,-134,-157,-127,-126,-158,-117,-145,-158,-117,-135,-127,-137,-140,-167,-143,-137,-156,-136,-158,-165,-156,-148,-168,-147,-164,-168,-166,-155,-150,-154,-155,-178,-133,-140,-160,-153,-156,-161,-178,-156,-158,-132,-135,-166,-171,-171,-153,-156,-171,-155,-140,-180,-183,-198,-162,-169,-148,-162,-188,-160,-162,-191,-177,-167,-188,-162,-162,-176,-161,-152,-160,-170,-154,-163,-175,-167,-195,-174,-158,-156,-152,-157,-147,-175,-161,-171,-180,-171,-156,-149,-150,-138,-150,-168,-156,-151,-157,-187,-163,-158,-165,-125,-123,-104,-117,-117,-122,-130,-141,-153,-149,-141,-133,-129,-146,-148,-143,-128,-120,-115,-146,-150,-159,-126,-127,-144,-139,-155,-141,-133,-118,-143,-127,-135,-133,-113,-117,-106,-124,-129,-115,-139,-159,-130,-137,-179,-175,-171,-197,-201,-190,-213,-183,-178,-164,-136,-137,-115,-121,-131,-142,-137,-130,-141,-109,-113,-127,-131,-140,-128,-126,-130,-145,-121,-132,-144,-122,-133,-138,-135,-150,-157,-151,-138,-150,-140,-146,-156,-142,-149,-152,-144,-144,-142,-138,-120,-132,-125,-148,-162,-155,-165,-165,-149,-164,-172,-174,-187,-226,-238,-241,-286,-344,-462,-499,-497,-283,-262,-222,-219,-236,-229,-215,-228,-218,-199,-208,-191,-204,-247,-300,-344,-176,-152,-142,-137,-136,-130,-117,-132,-149,-158,-150,-158,-190,-228,-328,-414,-246,-234,-220,-237,-269,-248,-205,-199,-206,-223,-200,-200,-231,-210,-198,-200,-180,-174,-195,-180,-184,-192,-218,-180,-159,-126,-109,-118,-131,-145,-166,-182,-222,-252,-286,-383,-285,-222,-149,-209,-171,-201,-222,-244,-201,-149,-194,-163,-197,-217,-291,-345,-249,-251,-297,-228,-318,-228,-198,-250,-206,-229,-286,-161,-135,-132,-129,-185,-122,-182,-183,-123,-138,-163,-132,-207,-295,-139,-203,-136,-129,-146,-132,-151,-193,-126,-198,-144,-122,-118,-134,-187,-220,-261,-257,-186,-160,-168,-170,-168,-169,-198,-190,-150,-161,-165,-176,-175,-168,-162,-154,-157,-163,-177,-170,-178,-190,-189,-196,-176,-176,-185,-185,-170,-175,-184,-215,-215,-203,-192,-207,-222,-203,-173,-186,-191,-181,-179,-180,-187,-202,-215,-192,-216,-223,-162,-136,-136,-114,-125,-122,-119,-118,-122,-119,-109,-122,-122,-133,-130,-150,-147,-143,-156,-139,-138,-145,-148,-123,-127,-115,-130,-138,-157,-112,-107,-129,-133,-132,-128,-120,-114,-136,-118,-133,-133,-125,-114,-112,-104,-139,-112,-125,-150,-117,-143,-167,-173,-174,-182,-200,-182,-193,-239,-233,-203,-237,-265,-291,-350,-390,-106,-159,-93,-119,-111,-145,-122,-137,-146,-149,-134,-121,-100,-93,-119,-145,-123,-124,-111,-121,-132,-148,-100,-118,-117,-116,-120,-132,-112,-146,-137,-131,-136,-163,-150,-151,-159,-102,-149,-155,-137,-122,-131,-137,-140,-175,-126,-150,-161,-144,-121,-143,-138,-130,-139,-122,-132,-131,-100,-107,-108,-111,-108,-109,-109,-106,-110,-120,-112,-117,-99,-106,-106,-103,-100,-113,-127,-127,-115,-118,-127,-129,-127,-123,-148,-125,-119,-135,-147,-115,-120,-140,-136,-149,-124,-129,-125,-128,-132,-140,-134,-127,-120,-100,-124,-139,-97,-106,-94,-120,-147,-153,-174,-176,-182,-179,-199,-240,-189,-158,-142,-140,-159,-202,-176,-191,-224,-249,-270,-274,-254,-208,-114,-101,-95,-118,-111,-109,-132,-133,-108,-165,-116,-104,-175,-136,-110,-169,-131,-120,-169,-167,-165,-147,-126,-132,-144,-260,-362,-304,-171,-181,-184,-179,-193,-222,-246,-269,-298,-327,-347,-420],"env":["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wcHFytXQuLO3o3iMkpuRhJa3sJOswMXCsbS0w8fg3+vu9fj06NXJv7q0qJ6EbmxxgHN1fVdBQzxJSjutzNvZ1cPG1N3o5+Db2Me8p5uonpmakGlLTVhteYF7e3NpSoORq7fKzsi8pKyuuLy/vb/AtqWZf3WCgn+Eb2VLOE0pQ2Ci1+v4+fPm4caykpuFaXCIlnNoYD9MPnBiX0xSUi0rJ3uxxtPi3uXn5ebi19G9tKukn6GmpaGdloJuc46HenpcXXR9uMvb4+TVy7eQn552cmeIkIuTl4x9dXt0U1ldS19LSlVKZK3Hx87S3eTn7Ofc1cm7sqqxsbGysK6vp6CQhoKEiIt/jYqy1t3g1c68poqJjZSPloN4XE5JWICFgYF3eG5kU1NPibXh5e7lzLrB0tjM0M6+urGbhVdhXXd6hIVnZlNKW0c8g87b3u7uzcrDvMu7yMm/xca3kZKIa2yQlJZoe4p/fnhye4Kux8XU2uDe1M7Cvaq3sravq6quu7mwmYtuSllNLjAbebzFwISsu8/Uy8nAn3Jyfo2Ii4qEe3qEiHF4bFJIT1VrZ62rraFgblRSWCc4RXVvbV1eWV1jBThzfllaRmNoKChMP4mTqLbLysK3rH6XkZenpqKhjXZgV09dToh3Yl9RZWBlaoKqsbfFztfU0s3CuLKxu7m0r6qsr6+2rbanmZl4bGBCcK2ViZa209zb3c2ejniWl5qdoI1zinxvXEFRT1hZZWiGcLONtrpnh2ZqWWVOT3FoTGlwYnxnSWSEj4pjRExPTDsxgI7M1LLY3cnIwaO5m7PGsamre3RhWGh4fGpzclRYbHZ+VKXEvsLe5PX////07efl29PHwqypt7mfpYaPbmBqaHZ9Y0yJn9Th9/b/////++3e1tvVx76pp7WymZCBZ1hGXF5kZGuGycbLvrqfkZV9lnOFfHqHlJ98V11IS1QvXlEsIjhrTUpbqcXq/fnt6uPW1NnYxcK6moGBXlJNOzpAIyBGLDNSSKKztuX/////+vLs48S1mZybpKmvoXRiZHqBimtsZ2NSQ2Bzh9L1+vry697Tzceyk21NVHGEmJWKY2BcdW99e1tFPEaIscHi7O/y9enj3dfUycbJwcK+sZVwOTdhTz45JzcIAFBYg52ep8vN0MnFu7WlqKWjnqKjk5qAb0ptYx0GG0ErH3KZrquaiYGnxL6Yh6y6mJ6oramemZijhpqBjX5tckxhdnGLhK6+uLG7sqqelpCDhGpdh5F6jY2el4mhpqqgp6Cfkpiqxc/Dzs3Tw76ceZiTtMzJvaikhjBJVFxtam15eV1ffp7K4dvN09bPrIGep7XM1dK4mn9tclV1hYt5hYuLg3JyiJuRsdji8Pv7/+/06vLn6cKio5mmq6GRkJGPfIqFgHOFfXpqZaDG5/367ePb3tzYwKelpaKloYuGe4KIfW9yjX1+d2lJUI/Mz8nZ2NPNxLu9r6uqk5uSpJujsKijn6OloZ+nrrysrp2dnaq/ytHZ3tfOxbCfn6yio6CbmKaenJ2cmJOWkZaVlJuRmaG7x8jM0s/OyLyojICSlZeSlJKUm6SjpKGZoZ+rqqyqqZ6XkZBQbImmrK6jrKOclZyfkpyMioaDhYOEiYqBbIGIhoSajYSYsuXz9fXy8vDk293Yysy9qZido6WTkIOlnJ6BdGJph4iEe6fg8vz/////+/Xl4NzNw76rsZ2OmXOBhG94a2VeZWRrTnmooo7I4fPy/PPy8/n77OrYs7WnTkN1On+DjIdgXXZbTldtpJSQzM/Kz83Ay8rP3ejo3NnY0ePU3NXOysquyNXb5+HG3ZDZ1tvl6N/h0crTxMzBt6Gzp6KfhpuAoYyPm4iBfoKDhJHe3NO/19HK1sGxwa6wwMCjsKydmpODlJZ/fH5eg3dfYzHEzMTf3Oro5dnOzM/HzsO8sMa/v6yrnKGDent0i3Z+iniAtOL3/P/////89fb689vMzKyEkIZtbouFi4Ztgp2HX3R/mMPm6ODcwMHCxqyspMXCz7usqbqhqqawnoiJh4uWhIaOZs7FytK7sKymrKCbeqOnpo+jmX9yZG95l3R3j4SNgWloZ3iOwL/P4eDt+vz07dzOyb+0o5yNfX54fHt4dVtpam1tVkg+sc7k4ePs6eve0MvRwMi/xMPAuLKumYySkntRS09YYHJ2sczl5d3dysbEw87Kxbqlq6yzt7Gqnod5dYCXj4WDgYeHv9nc6OS/lpyq0NDR3daub4uajI+Zo6mgnZOdZHhugG1qgYy939rl6PP18ero497d1NDPy8XKz8jFxsbJzLuud3NOSFKWnb+crrrIx9HWyqGOeJayur6vnJiQeH+MW3FlamZ7i4N6isHBy83NzNXY1s68trrCwrGwrLW5srW6ubGdhnxk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b1tTSVdsbXJWVFtmXY21vcPEwsC0pq+2sKWfoJ2aj4F7hHFMXWppXmRWWGhfW1FtcGxmcHyJx9XS0M/Lx8a2ur6ytLWwpJqLlJp4XGiBe35uZH5xaXZ1hJqAfISAkb/V3+DZ2NbPxr6tubu2saerr6+wsKapp6imuLaumJOMgmBRM1CSu9LZ4+fj39zPv7LCwr62sa+2ubW1sayoq66rtru2tJyViWZPLFWMxbeQnaLIyb29sXaRmIeMgnVnZV9NRVFUYlRqXV9NR1tXUGp0jZqqqLe3tbSMpKeUkJJ7gIJfYWpdPkZTQUdOcGlbTk9UUk87SzQhb4+1wc/V1dDNwryrqa2uqaKdpKeqpqOfnK6wqqCRfGxTSjElMkF+p7O9yc/Oyce6tqmkq6ajnJSWmp2cl5GMkqCin46BbU87JR9MmpOvwsK9s5ihlXiFimx3fn5TWmhQaUtSVGZMMTwlUlhPMzQvMpW/f6y0iammmJmKm66smJJ4j6vRza+evtfBuvzYuf//4+Hjz+jpyP320/bd497W1OHKyNvbyOfJyrLIy7y+t7K0xL/AqJuRnIWJh39ez+Tc5uPs7eXQzNHQzM7LysfKycvQy7ymk5CKbHJ5enqguMbi6ufn2dPFrraBlJuMfpZ8j46Wg0AgdWRAOzI6S0RjosrR5vLo3tHJuraxr6uCmaCSnpuLe3c8OEAxIA8CAEVJbarL4ufl4sm+sq2aeoaAj6KZoIBgWHJ8goVqbmlaWFloUMbN5uThz8aNdoFvk6Ocr7KirIeXdIh2cWmCeIJna1uJhanKydXh5ejc0cjCs6iZh29yNAVXf3hiW1dKMSM6JgInXISiuMvO1NfFvaWZgHJbQ1xjaWlpTllMaVRqQEciK1pkqa/F39bbyLrS18ijsLa4pKCqoKihnqumhYiKjH9ub4KIzeX59dzIwbm/vbK0wsXIyb25v7u1p7KxmpeYlaOcjpKs0cPIupSHcJqZtaqfnJuggVRdeYJue36YfYB/cmdQfIvFuauan5aYm6yyuJd/f3KAdIqLi36RmpWBgFlrYl2De4F7gMzA4ffv8eDl6NvUtqChgWyJio2Rn4lphYB7eoGEeHByquvu+/rz9erp39XRxru5vbW5rZ6Ph3ySlZuLe2xleGiOiNjkzebh9Pr33sPExMvTz6udua+axbqtl6qwr7+0r7SrkJp/eI+lwM/V19za2dnDvrawuK6qqb6xtrSvtLm+y9jg2dLFqZaHaHGmxsbOztHS0se0npytr62lpaCpqKGioJ6eoKSjsr3Cw6mbinRpYWJUZYOisLa/vLu5r5eSl6CWkI6DkIeMg396gHt/goN/fHZ5fXR0dmt4cHtydXJ8fXt7fHl5enJ5dXh5eXVvc3Nub2BgXVJDPzYbEhYAAAAAAAAAAAAAAAAAjtC2wsHI2MzBtbO6rLGwkZebfZucka+0paissK2sqLS0kXg7cHd3fIiThoWHkMrD3djUusnZ283O0M/S19vJztLPycfGydHc5f/////24ebm58rX2ejp7dfY5erw4uXg6d3Z2dTR2NjL2dfe2tPT4NrW2cTV2dbByMPCx7itu+PJztzt6N3W4+3k5NPt69W+o+bo///5//////////b/+Prry9nB08rJubOvqZ2RmZuSlXGy5P3/8Prj2NPW0Lu9vcrKsIVXXmJnVVZOd3BXQ0pYLV7t4qvOrdTp4dfZy6mUhLKojXOBgIFmd2aBaXRLPkFAWNXf4+/y///p3eDLj6i/uqfAxaqLeXuEiGiKgVZgRjO+zbG60trf6Ozn29DDta66w8O5usG/wdbFw7islYJvV4i+0v/////////w5eTPhoaoo5yorqGff3l5NUA9DUBFntTI4/f39O/kzL3CysO6vb+lhmFkSkNzcmA3Ok5AQEBfj7rX08/ExLG2taOtp5V+bWc7WVYpFzpGXUk0JldTP1+jy9DJ0MzGyM/JwL7AyLWzs7ydf3t0fZOXcW0bYXdqacXSwqyqwdLQtruqubeyu765ua6tsLGvn6WUm3d0iYyAm9Le4N3cv8zOxcS3nrS2uKqbgoN2aXyEcj5LXVVzYy9zyPPz/v//////9Ovl28zDta6so56ViICGemteV1dIQV2T4Pf/+enIwrmqmpqpp660sK6YkYKFepGFk2VfZXttZ4/U59vX1NXj5uPg2NvY4OTg2t/j5eTj3t3m2tXOxdDO0Pf///7lz8Ktta6nsLy9ubqqt8/SzMnBv66ssbqzr5La/v////Xi8+vt5+7////79O3u7+j07PT06uPa2uTx+vzz5NK22P//5ubK5OHQu7eercm5s9DdytjL4Nbn2sXHr864zKvS9/D97Obs+uL69///+fbZ3MLh5uvl7Ova4sLSwtPW2eCn78ny//313NTP5ejq5NCqooicrZe6vL/Ena2XtIzDnZzLz/T6////8PXv8tniw661yPH9/vT39O/49u7V29HQ19rQzNzb2+/19+798evg28bQ07uzqJ2fra68uq+gusC5vaWOraB8kI+piKewxMfDt724vbetnp5caDxZeXh0Z2yAq+nx+/bu5N7M0MKvvMzX3dnRzs3KytnSwainsL64rram0cKu1MV+f5ezvLSyvL6qX3eEeo2AkYCDbn5ydmppeIOsw9/gqnWev7q+qaO7zbu+trKtoolvF1SKj4WDg3p3gX+Rtdfax7y0wbartNLGs7atr7W1pautqbWupaKhl4mEfnPD1tbTvo2ltLCkpayeqIxtX4qkqaKowsm2vrK0r6ykqrHQwrjX3O3/////+e7l5dzaxcaxqn53gn1cVlZWX0VORbbS4Pbz9Ozm4M7Mysq9sKiwq6qotLGhmKSUhoJ5ZGR8jbXQx8PCvbG8uLCzxcu8sK20vb22rrG7wtrkrePcvaeZhoTa3PL/9Nzj4+vt6Nrf3N/Ot5yspaeTh4SHiHx9bXVwXYjq+/////X1//////////bt8PDq5ejp6v////T49M3P4eDdwvXw4uLWybetxcnW2tDWyqKekoeOkX5/noaJiY2ajHZ2xOXYy8GosanAt7qQkJ+PkoSKi4+FfYd9a3FtX1hNPzk8MxcAAAAABAAAAAAAAAAAAAAAAAAAAAAAAANGUUJMZW9uZnZ8gpqqraqcmZeRi5GQqsfMxp67spy+uWmZmH2Ag2h1fGxveHxrZmpiZGBhVlVWU2NaVFhRV1JRVTQAFgMMMSwZCwYCKjk5MjxATk9RUEVQZGJmZGFZXWZqZ15dZmdpZV9UVVtSUEVJRUI/OSwjKSAaDR0lIhgYEhspJx8UCBwYFwwKBhQaGwkJDwQAAQMJDAYLAAAAAwYPAAAAABAMAAAVMSooIu/3////wdTv6vTs5eTn4vD////////44/P9+vjj1MPCzce1qJyQwuny+OrUs8rh6+zn/f////r34uv28fTi19rP3bqYm4OeluLu39LVybigqLz8+////+jXwOTYzNe6tbK4qLKQjoV31///////4cHHtsG+5P/////z1sXGxcCunnOuuaulbDJFKp+eo5qOn5WUi32Wksf///////XW2tXP0qbKubu7rolyIyG24+7l18GY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iZK8zMu9t7i0pK6pkq/Cv8PFvLSnlnZyi4+Sjpaxs66xm57H2tjFvZ6rrLCcoL7P3tjMubyxrbmorMLEtbq0s6SgrL69tsPDzMGtpJ6on7K8y8KwlYWSdmqDn5uls8TCoZWiuMzd08K4tq2moKGPutTV1cywobW5ppKyts7MvZ2zw8O3tsbGydfJxbWwoqKHna7Bxci+u6+TgYF5maK3oZ+jn6e2v87R3sLCwMrRyrWuvsXU0Luzrq24u6GLrb3Du6ertq2mo7TF0NHTura/mpqpqbbK08e5qZ2dnn6TmaGusaulopy3w8zIusbPw8Kvpq6bp8LL0M7N0M+4sKSQkaGvqaysp6KisLXK3NTDrrXNzL+utNDl4OPc09K7v768sMvNr7+8t6exsbfEz767uay4x7exoKbBzbiZkZqcpaqlp8C8sbO2wby4wM3Qz9rX0ratucOzr6+yztnfybiyqaOfrcrKwqusvbzBxcjR3ub1/fjl5ebs5Nve5OP/+vr0+P///O/w6+rZ0dXDx8vPz8nExdPe8OPn3trCwby9vs/z5tfU2s27rrfUu8PJv7jBv9PB2ufY7ejJzdbd7vXhu9ne4t/JycnCwbG4usfLzre3sby8uc/Y6uXMzLy3w8Cr1fDp8svPlpywr52zzezz9Oz6+/z9/PTf0uDn1dDV0uHm6+jp4+Hs6eHU1t/Z2MXG1dXu8/Hp38241eT08+vX2tDY07W9w9DK0NXSysK7vLWuxM3U5fDw7dXDu73X4urr3NTH4+jn39ze4+XZwru3ra+zy9TKyc3JyMHDuL3S6erRur6xra+oqsbc2t3TysO3sLCjobGqp6mnqrG2trHU2tfi5d3Sw8vRzbjA0unj0Lq1s7GurqfB2NnPysrS1tbc4NzT2tLN0M7Qvqa1usLUxcbJzsO2t7+7wcPKx73CxdXLvLPH4t/f39DHw7WrwtDZ3t3d4d3Yy7e0trzHy9nTyMfNvtPO6ebe1crBt7Sns7nWy8vNwsatq5qWkLTGw8zKyNHIyrm+3OPh2MvR49njuM/b49vQx8y9xMXCsLvUv9PNzs+6s7esvNTU2MG/yLHFsMDX4N/TzL7HvLvHxa26sbGuqqawq8LF0d3Z1NHSycjFw7vL3NXc1MfDsrKvxcC/s8O8lqurn7fIz9TSztHDvcnKyM7RysLLw8vCub3Qzci9tJmhq56dn8Dk5dfQrLOom52Oi6Xa5uPRv8TN0Me/w8Knqbe1q52Rl77IztDVwrW4rqalsbbZ3ujk0dLR0cfC0djh083V0tTQzsnOysjCo7KsppaGdJW/z8bPvrOwrKeko6usqqCPn5WZl5Gnw9zg0sS0tbm6wri5xN7f2snCtKyfk5qqurqs0ODe0MC5uc7k7+DJu7WzqZ2xs7jCwauioq6qlaSxoq+2trCxrbCuxMrh1tDGvbWyq665yM3BvbuklJGHhnycq6iutLOkoaahrt7j39rKtqWclZ+wt8jHsa6urbSzraWqraW5ztLQuZuZpKXI3d/YzsKkoZmZoKbA3eDXvq+llo+Cpbqys7TEycnUycHd4tbl4s3Tysi4tMvU3d3VxcHBwcS+tbW9rLSgpJCLhLHa2/Lm3dC4wbWqobXKy+LszNzIsszLvL2ysZeWjZWTkY3HzNnSvMa7v8KnsLXHtrrAsLGtlaCjiKGvsqizubepmqCwwM/Qyc/LzszIvrHDz+Hi29PJ0NDAp+Dm2NK+vbzFxcO+1eTs3Mu3xs2+qp7H1+fq6NbO2dfPvMHS0Lq5r729vLjC3Oji0czEwb7Bnp/J2NnKwsO9tq6xq7i7tK+ZqK+0vL21ztzSv8bHyci8lJGsx+Tq5+DYx7qhjez16NPQwbyvo5mVvdre2tLU1NPPwbnz+PDu3drYzrirs+jn5tjTyMS2rqSr3N7Qw8O8vLa3oL7n5tvf1sbBxLu6n+Lj39jJy8zRysfI3uXT0MXP083Frre7wb7JvrS5tZuiptDazNDLyK+uppmd19bTyMzW1dTDrcvT1NjQvr7DyM28uvDu3MbW3OLez8fCzeHt7+fh6Ozn49jg+v/////+/Pn08+7u69nW3t/n5NzKyu////Xv5N3h5uPa//n6++nx6dvXw8zn2O3r5OXu5+HX0/Hh8+bc5sm8z+PazNLY5+XTyMPEy87JwcW8zMvLubSOsdrm2c7Ax8/n6e3h6ej7/+Dy6s7NxMXs3+DW1dPLx73Kx9DZ4+DXzdXk2szL19zY1dzm4NzRzMbL3NTJxcq/srq9tuPn9fXl29bX4+nu9/z9+Pvm4+3n8vDe7/b79vnm4e/rw83Z4OHbzMnQ0MS5zM7Y2czKzNDc4eDUz9K+xse+wsG7rNXk6e3k5PDy6d/Z+P/69u3g293aydXe3dnW19zd4ODU0O345tnRz93f3dPJ1NrR0cbU2NbUzr/W8vHn3tnHzcm+zezu6uni3+Lq6unK8Pz07ef19/Ps+Pni5tjT2dfQzdTSzNfo6/Lp5uHn9u7p7err4+bh3uDj5NLg5+HT3t3f5+bb0sv4///37vf8+Pnh1vj48efi5+7v9///6PLy+OPs+fT//////O/k4NTp7eXd3Nnj4uvp4eLg5evy+P//+uvk09/i6efL0uTt9enV29fT2tC60dTd3dbLx8bKvrPm49fT2tfr6Ozu7dXv8enp4dzd1dbWzKyut8bLrraut7GvrqWmsbGlobK6uqedsMLHwLm/w8HCtLe2u7q2t6qpopeJhpaSmIuIgX9uaF5TVnmdsra0pKamrpyii42UopeMiY2Sc3Jnisu1wMe2raSioKCqxMfGxL++ubuuqKuktLvT1tK+vsnL1dDfzdPU393DyM21y8zh5ujW5Nvi3NzOy+v8+f/1/Pnx4uHYxeLn6+zm08XAw8TL9+/+3uDo5+HXzcfi7unz7OXSzsvFtL/U4OXe4s7LwL66utfZ7+nn5+Hg4Nbd1Ozr8efhz9rg0M3G5/P68PX/////+u7v7uLb4eTm7vn59///8+/w7uzW3NzX09/r7OHk6uXh0MLHxNvh1eDW3dna4Nzn+P/t6eXi4efnz8Dy9Pbz8unfzcDFyfn6/+nu3t3dts/C7Ozp3d/E4ODMzbD9//fw6+TY1dPSyd/t8eno19vc1tjb2+bk39ba3NfbzK3Z4efe3dfIw8LJxdPg6ODmztjY5eLm19nr3u7q3tTM3N/c0d/Q6OnS39be2NHS19TYzd7Y0tvFy7zHzce81dfW2su6usDO2NTPyMfV1dbR0d/k4N/f1ODh893TytTKxcjX6c/d6Ny90MnFz8rDys3Iu9bw8OjYyM/GvLy2vtPj4tjJzs/TzLnAxsnOycvN0dzYz8LN29/c3r7J0sTM2NLk49jP1dTM09W8z9HHzdrRz8nGx8nW3N3T3M/U2uHVucXM3t7e4d/Y5NDa19no49HR3dbg3czb3PH69PHw7fHq4urk3vH49vHl4ubRzbjJ0tTQ1uPl5eXj3NLY1c29t9LY0cXAxMvLzMnIycfGvK25uuLf18rKxsTAuL/M2t3VvLeus7ixtsXO2NbSxsPFu7Osu7rS2NjOzdPQx8Cyttzj28OwvbGjm5mtw7rGx8TCysTBt7LCyamqra6op6SWgoF7iqyvuMLLxrixsaebko2Lh317gYWJfYOQkpGPiX2Be4uTjomFg5yab2Nxgn5rXGRoaltIT1BBQT80MCYpFhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMmNRcHN2cWthWllRkJSJdF9YXIWHcneEgXl2rLy3p5CIhZKUmpmclI6wsKSei4KEmaKhmoB3cpKKl5aYk4+gqqyTfXmJoZScoqegk6qqtJqOhouCoqShmJySjpecoJugmJGus66hjpGqm6qqqaWlvMa6qKCdmKKmrbOwqLi/yb2toaC0vK+wr7G5rKaerLKenKKjmJCNiHxvZWVcWllaU1ZXWFZTUU1HQDczLSgkJSYkKDutuLe7vbi2t7q5ssbL0r7Dwr3I0s/FxLu01szNusXY29nh28vX5+ji3t7c7eny5OPf3uPY2dTf4eji1t3g6Obu7uvn8vDv8/Hy8uzs7+z26ebf4+nk3szC197d1NfTyMjBxMDJysnFzsnK0c3LyM7My8zO1tbW1dfW1NXR0svLxMLDwb68s7W1srGvp6CooaifnJ2VlYKBfXlqXVE7PSwyEQAAAAQBAAAAAAAAAAAAAACZopOGcldYTFCwspyGe2xeca2moYx1dr/CrJyNfGyYpaGajW+cqY+HdWxwXVN2dnp1d3BldqGdlHhte5V+fX2BeKLEuremlpmipqCdl4+Bz9HHspyUlZ+ypqempZ6XprK6r4qBjq2nmqSmnpewwMm5rZyftauso6mrpsDIybWkqqKfnqWQlJSfkJepi3+BhoaxpJaYlpe8uLK0sKiutbiwqqOhsqSio56TmbWnsbO8u622t7a3uKvMycfHwrS+w8vExryxtsW+xry+xMCyrKilkZ6hu7C7t727wrytq7Ohmai7v765q6Oyqb6ssLK1trCyrb6uuKOgkpaXmpKQhoi1tbeusKmlpKCktMXPxby8wdfU0dDEwszQ3dPDubvM1t7d1djVzMzQ1M/OydXa5uvd4N3t4uzn6uDg8Nrb4NvZ2djX0dDDwr/Ox8fFx8LAub61vMO3uKq11N/Sxbq6tLCoqqKfm6aUoJWgmY6Rj4SHgoyLiXp/gnaAdXRzeG1zV15ZWlxZXE4+QiMYBgAAAAAAAAAAAAAAADyTmotkRR+LrrCiRVmtwrqbikzK5+zr5+XZxLimkX50d8G8rqygmLjo5tzIp5HF1MGbgIuKeYBbWlCw19LJv7i4r6OfdF5PCxIgFwAAP6Gss5d8bKvYy6qXcLK4r6mQdoff5urp3NbVycGvnoqd1dO8raSWo97Z1s3Oz9PJv7yzsbi2vLCopZGJubuvrLOxpKSVkZGSkJCRlYN/a01TTzMjFhMxKhcKDic4FT4aABNznaaie2tpbWJCODo2WoeHQCYxfJ+lk3lmV1JNPTQpYWsrUjQ2bqy4pZmVhn92XTo0MTVUV0o+IkSbtrOakKWgdGptZGt9bnZiVlCRw9bVwq2anp2Vh2VMW2hoW1JZtMXJwq6jn5qIeW5ydId8jn1dVI6zuaSbmI1ueHFaWFtSPSQqILrT2NfEsKrL5OPOoq/N6+vpwL2y////+Pb2++zj1M61y93d1dO3oP////Xq0cfh4NK7trOjkopjaJn7//z/793k497YzsO2taybopybzNPWqnBvz+rXqHdgyNDEo3Joyf////b39vbgy8WomN7k1cG9tbT08+zj4N7g2MzMycC6ydPEsrKi2+z08OXd29LLycC9uK+rpKeqqKOagHVdT1BSRz8/OVBqbW1kO6vl9+7l6OLQyby6qqaVt7+0lIWy6frx5ujXyb+9s66ll4R5cJLI8//w3dvCvtbKwMjDnJaSZn3a4OT/7tnNwtDUubO7rJmblJCm2Ofp5Onk3tfQs5yRioJ7d21v1vT9+vXg1cjSyMK0tbGlnI2BdnDB1Nbo59jd2Nna193c493a7uvt6+/0+f/z6dTe3M3Gz8PKzMvGwsTBuLKzsri8tLO5tq+xs7KvoJieoaKjmZGJkIuBfXh8g4F+fG5tc2x8ZXVwfnV4jYiHf4WlpZ2Gn8HUws6/xr+2scS+0sG8zNfTxL7O28qtssrQuLO9w9DU0tHKwb26uLm6s7i2ptDR086/wbq5v8W/vbGotr7LybyyrqinoKKgir29v7CnsK6vsayxvL+2xsDY2tjU0NDXysCsqrPGy9HIyMfR1NbNx8fKzMjMzsrLx8jEwL2zpYyvusfEvbW3v7e3tMHJxqmgtL/Bv7/SzNLIxMHE197a0szGycPDuri0rLfL4uDU0cPOysrMvbzP0MK5xMvXvrG6yNDBwcvQyszJzs/Nw8G7ube1uaujxM7NyMG9t761sLKwn8G3tMTJy8TAraynrLSqtbzDuri8urW3u7e0mqiqr6ecnp6WmJ2knZuRsLmwu73AxMnUx77MycC8vdLMxMG5vbKoqJ6goKSomqihqaaepJ+OpKW0usDAwMfJ0MrIxb+/xczJycS+xsPCvrizspmokoR9dHR7kJGIf21ncmttcWx8iYiRjo2GgYJ1V2BwfYSHjH+Fg42LdHt1aG94foCDgn6ChHV5eJGUiIeEfHqFioZ2cniVlHx4X2d5cXN+eG+Jk5etuse/pcbGuczJtLe9vqWjtrO9ybaxu8S4wbGyrrGlkaKcmX+jpZ2yu7fX3sDf2dHDwra0hqCjsMLCu5abwMXW1KyvnJaQfX+Dk7CsoKKloqShno2Ki56amnpzZHV2fnN9gZyxsaCNioydo5qEgY6kr6qAe399g3x0aneVoaaXi4WDg4F6dGaWsbSahYFep8/R0snGvsbKvb/EwNTNwdrX8e7/7+jc1+Hh5Ojm5O75zu/lx+b+//74+v36/PDr7tvl+PDm4uvo6t/s6/DX3vLz6OHz4t327+jq8c/j2+n46vLm6uXw3t7d5/Pu8/np3+bk3tzU+f/88fH06unq4s/O6ezu8fPz9vDw6vX97Ov97+Xd38HQ1v//9PLm7eDM3N3U2uHc2tbf0+PW2+H09evy5tjn5dfj3unj4d/f1tHFxcbK0NLZ2czIvKnCxMvi29fc1szKxd7e1+ji0MHSwszWyrOv5uvi083P1NHTzcrT8Ofq4uHb2dPY3Nfc2d/m5+DVz8/G0NrYzsLOz8ivx9Dm//7y6+zs3tXY3OL8+fHs4uPa4+Xi0+r38PX9+vHz5efr9fn05drh6ebbt9To597f3ubm39Xcx8XTxcnCyMS9u9Hv9ez2/Pv+/Pbz6v///Pr9+fv08Pb05/Ls4tvd0MvU4+rk++7j6+ju3NW+xuro5+zn5u3l6+HW8/Ld3uPa2djTyv//+Orp7+Lj597gyO707uvv+f////Tj6NTV6NzO6O7h3ezp/Pb269/19fDv+vbt4Nva59vn69jq7Orl2tjh5tnd3/n8997m8vTt7enT0P//9vTx6ufy8u7p8fj39uLk5+X5+/Xy///39+/y////+fvv6N/m3NDJzs3c7f/z9dve5ebj6d7k6/f/9e3p5uDVxNLn59vc1czM0dLDp+vo4dvUzfn/9O7q5uvx69XUy8vEycbGx8XExMzKycHKyravqK2sraCxr6y2tbGmmKKptrq3wLW0trK0taywr66+rqWjpKCQi3uFjoh4cHJ6e359e3uYsbWssKW3uby2s6iut6Sip5KRk4SIe4N4enKAdn94ZVlcYF1RUFJXXGFsan6Gm5qhoamrqaemqKyemIyBgoeEbG5qc3FuVlNcVVpdW2BbWE5ARUAuKTEnFxYfFhgVEAQAAAAAAAAAAAAAAAAAAAAAAABKz///8vX///v47uXf1dK8ucHLysnK0Mnk8/T////////3/////v317unh3dzXwObf5fH99/n6/P332Mi9zMq1ztPO1NXQzdfb1O7N4t/s2tfl4uXg0tHOyca3tM7S0b/Oy8a8yr/GwcPIw8LZycfNytXF3dzV2OPn5drl69fg6eHl6/Pq9/Hz3d7t//X//Pr5/v////b///j/+vP09PD37O/u4fDo287MyPLw8erHxM/Nq622293c29fb4/H11OHq+fXb49bk6uXt6+rq9/Ll7v79///x8vvl4uvt4eja2vH35t3a6uvu4uLZ1ePl4c/Vy9rStM/W5tnl8fn+///////3++7l2eHr7Ono2efp6vD39///4NzS4+3t7e/4+f32+vXmzMHU2eni5dPT1tbYz93i8+vk29DMv7jBuruw4OPd1tG9xcHH08jY1trY1t3p7O3dx+Pa1M3b08zJyejd8ebl6ePYyN3V0tjX09PDtLOrpr+9wMK9vL3H1NPVz9vc1djRxM/d3MvDyM3U2tbMy9DJtsDO+f//////+enu69/j5+C9y8TJuM7L1c3Z38nP2ePLxtPc5OHa797g4MnQ2unr8+jn5vH08Ofu8fny5eDi3M/N09vj6ujOxs3Qz87R5+rp6ebg28W8tsPP0LO7xLy5u7W0vdjV0cnPu8/MxbvY19TbzNfDz8+zwNLUyMTN3t/VwZ2sxc3NzcG5xsXCx+/28ubw6OHq7u3x8unn19rg3tnPz8ba5czRx83b0dLD2ejv8N3O0M/IttXR4+DV09DNwczOwNvi4O3s3OLi4NzY2fju7tni6drPzuP49Pbt4Nrg3sTZ6uzn8fDv/fz///3/////9+7n3uDP08j4+//6+P/v5fTh2N7t/f//7vDr293Y3dT5/f//+PLx6PHy+Pf////38+Pj4tHR6vvy///e4/Lb3/D6///17/b/5d/b9fz3+v36/fnw1cjw4tXV3N/29OXp+P/78fT59e/l4+Pv8/Dt9un68PP27fH/////+vD48eTq3/T1+N7R3Pf99v//8vv/+/b19ff07tj////37fP0+/Di9f/////4////9PH38Pn/++X1+vvz4e7/9+vm3+fl19PT//vx6uLo1tPQzOf8/fjw5P//+ea95vHy8PDm2OHj3db0/P3v4OLdyMzL2v/+7+fg2dPTz8/F6Orx7O7r4OPf1sfq7/v67N7r+u3P19vZ5NrL2djXysC7yOz5+/ns3tDIy/Hx9fn269/e7t7e9evx7eDZ087U5OXS3d7X2NHR0M/HzO/4+fj18+vv6+fl4vP09/jr5+bn5dfm9OLe0svPxs/RwOLp8efm4Ova1szRy9Xc19XfwsjQxsTk6t3U2tTY0dTZ3N3m8/vx3s/Rx8jJ9O/v7u7x6uTo7+Pk4d7f39vYx8G73Pjw6dfr4t7Z18vZ6PDk39ba0MzKw9Xn5NzZ2dzZ0tnT4+fl1tbl5Onl7u7h7Orm6PHz8ezg8Onz/P////X69//+9vn48fzw6eLW0d3R1Of1797r2tTIxcv09PP//fX18e/u5O/5+v788fry4+3i8P//////////+fr/////7+n01dLIxrbk8erm0MTBvbSuoM7j7t3X5dfEtbKvpri/vrm1ua+xrKyytau1r622wMu8prHJ08TAu7Ojo77DqZ2Ym5+frrbFvcW4ucLFnam1vLiyoYOJim1xaV9kbnV6doGEioiFiZOcl5+ys6Sor7W0trXEy87V2NDT09rg4Ozoy8nW2uHm3dTZ2d7e09HP1tjX2dXPzsirp6mdnZqWkJyjsLm3srK9vsi9p7m5zryvsr3EvLSnoKGgpqSom6KanZiMkZORkIeQjIqKjIF9dHh7enVubnFzdXJsampycGxucnZxY11jZWZlZWVsdHdzbnyBiIiBhI+ZlpeVoKaosq64vLfBw+D08v////////r39/vu5/z2///4++DX2t3t6fX/////7+fb4snBzP/9////58nI0MbR/+jx+e/29v3p2tnl/fz14u3Uxrm5w9z6+9/l8ebVzs/r//H8//zw4vPs69fW0MvSvr26wrWs0fH//+Lm5+Pi1tC46P//+vHt7+jv2NjF39XEwsiosJygm9vp6PLw6tDa09jQw9Hx7ePt4dTa2MjBtbzEr7q8obe0nrnH5+z24uTe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mqqxxKXTzsq62M67qrKrnLGfrrXe17bExMfBurnExbzd6eLAwruO0Mvq6Pnyy8TNxsy/1uf689XEqqeso56fxtnLwejl29/z5P272cnSyNPQpbygpI6EgbCkiIGEh3uFrs/T+PDntsO70f/89//83dDGxMnf5PT////Nr73Dwru6xObP5Pn2///25vj//8nBw8rEyb/Ewb3Dzc6rfIB/lqCZzOn4+e3EwbmqrMPc2PHszcDP09PL6d7q49TJxcC0lYLC0tjF2eLt7Orv8vbl9/HixLDJzLjExsDLzqygm6SHgpSnqaWqt8TXy6u1w7S5mryyvbq4n5Kjt7KwqZh/c3aGloWVm56Zu8jCuqW2sa2bsbi80r6xq6Otvtbh4ta5qaGMn7bSvNLHxb++vsO9uL7K076hrbigh3x5f3qXrKuWlZaTlYqGgo+dlZ6oqqmduLiGnJWKnqmwnpCDkHVvgGuNj4uPnqSfpqy+1tXarbvGuru+uMrDyK6rq8bDysi80eXo29XIzLOsra25xcrNyuPz9Obn+Pjf0efny9S9u7jCuqu2tbCoxcubt7GlsrvH0ejs5dvCtq+0tLq+ys20sMS5q6mmurPTx8W6vKOampykpailtMnQyL3CysS/saGosszAnpKcnpGWqZ2otsC4tK+2uM/g4dTApcjN0sjW0NfRxc7Q29y/4+rYydvc7u2+p6u1vrrHvs3Nz9fdzMPc6NjVyc+/wLu8t7Kmwsm/u7m7q7e1vsfY09zt5+LWyMS/xNTd9Pfj0MLAzcfZ2M/D3uz/7OTNwcGxxMi729/x5dTm4MnQwczKxNS9q66fop2vory8qoCFhIOPnrK1y9jg0bq/sJirt9HGtbO+yMzIysPO2NTU3bWnoZ6dpaTAvtHZ09ja4NPPy9PIt6GjpbK0mZKZmJKPfm5le3ZycXdygYB9hKzOxbO9n7GxpZyesrrY2LnMyM7IrKO1pZSVoKa3qa/GuLXZ382vlJuqnoyEerO4x9Cxfnd2a0ZGQlBSYVRPT1FRN2ecoaSPnJujmqeae6TBxrfCuK6Xi5mkko6QlKahpK+Xjo6Mnq2ssqajmJiZmaCh38qvrqWfsLO8oKWjkpybmqWqna+6ys3Px8iqqrSomdT3+9jk6Obu4dHKsYaMhoGCcmhmZoGiqJ6EgHtqcYGJiqSutaWOkIaLkY16c2dwbmZhd31+e5ycmqaUiGxfWkVOXKizlpKOcmJNNzE6PEA/PkMzKzo8ZJ+qqJmafnt+eIOBcKOcn5d9dXR6e2NraWyAh4CCfHRvea6pi4OLhHN1blRKWYCnnKSjk5mAqamVk6SagmtjZGB5d4OomLGyuKmiuba9s76rrLK2lpCPmJ6vrp2cjpOPjKuwqLrAvLuxn6umrKqsvL6vv8WzsLHP7fPu6u/Kq7Gwoaq3t8G/usHFvry9wMzS1drGtK2lqIl9gY6NhXR0aGlacHuDiIiglcOyvYyNj46ck6Z/p7q0sqaqpZyZsLCznqJ9hIZ/bICTr67ExMy2uLzFxLqotqWspYiCgoWZmJemnY6Un5unprfC0MjFy6ulm4uFp7S5tbHQy8a/tLu+sa26nZqTjW1zcH2BjZWss7qhkZydpb+9pcnMtKinqKSig21/iZBhT2RXYF4qMWCboJORbV5bNT4uN4Kpq49/dkw7Mi8sIGhranCCcnd2fYus0dXKycS8sLvKx66qysy9rK2ko52hoMLKxcTBtayxs6alu9K+pqWkqa6UkrGyzMOtl6C6uaWWkbKyq4+Ni5GOjYuVpMrLsaOwwOfi7L+5ucSanZeHnJp6aKDFuLmzoK2gqpSDqLGTjoh3gXZwaFeSo5yTf2hrZmdjPbKtmoV1bGlUTFhuoq6cjYF/bX6zvb+5qqWVeWh0foZmlaShvam0vr+omJORqtbavoqEp5J0YLC4yLesoqWpsaajksG6uKKSnqKvo5asucW4mIWYq6OQfpK8v6+Jg5Scc3lvcIGPp4+Gh5yosLe50s/W2MGtq7G9sqWrr8GvpJGmt7u8uszHyMHQyMzD3OPc4/T07ub19/Lu9OzVz9fw9fXf4ez4//vv7NXPzNz///////f129va7Pb5+vro5+LW0dzXydzs1cP0/f//////+fnI1cvZ49PFytrU4v3z993Qxbzp7czVycjFwsauvbW0x7CeoLnDzt3f093Y2PDt9+719PHb5drV5uHZs8S6srGkr7Gsts/Hy83Cv8rI1syyzePj29e9vs/a6dO3wMXAyqunl8Xg3ubd1ry/yM/k8vn/9tfLz9nPw8vH1NXB2uHQydLn7tW7sK/GzOPTy8vW3t3b2s3S1b+5rKOpt8SlsrOyu7GpoaCpuM3Fy87I083MxtDV6N7o8uG7vLu0vcPBqp+Ji42Ol6Oyr93h083Dtr+6trqytLezprC7wLy0q6jIzLOeoKanpKuspOHSzMzLyMnMvKm4s66mn6i+xLOepJyfra6qopiqs7+6q8PDsaaapq2xtaSftsu7sbG2tMzJyKKyqJaPmaq3s6WfxdrWya6stKenoJ2gqsTAwrq+rbGgpKmfsrO+vqi6mrG1t7nZ4Nnl5N736OXp48O/zcjL1sbS4dvRqL+/taCZmrSjsL2/0su+usjU0MrFrpuhwca8op2YiJqFeIm5zMy3t6+3wr6qhJHP6/Xo3eDU5PHmzMvPxrW5qaWiqpKWio2MjJ6Tc1WBgZCrqLfZ18Cxt8i+srebwLnAr5KUfHdiU1BDRTc6P0U+NS0tjdXr8vXYy7/DvtrEw9PWv7+1ppyLhnx+f7O+vrGqm42EgXWGsLa2s6uvp6mwr7icvNHeucCwpaOmo4+xs6KbmpGKhnN2cq+swtrP1eTc5O73////6tfe3PX/////yMvV2+bXxa+ksKG80tOlrJqemYB7cHiXmqCWe2dmWFMmDobCt6iqnpSJhX10fKC5vK+1uKrBwdjW193x2uLMtsXGzca81+Db19HPxbSZpazDy720qqOouMK2tKOssqmmmZSdoZODfMXPwKWTkYySj36AorjFppympbC5v8HS5+jc1+Df3uDj6tHCyL2vvKKWfX12pcG/nH9nYmNYP1CZr62Te3ehy8u5eKjXwsHAsZmKhX5ufqmwqJSmrKWbnrTFwsXJwb3HztPa07PZ6tzi9+rb49/ftM3f0sXIzNPU0tPY6+bm2trSztfV0OLy8efS29Tb19Dh59vk2djWzMPEvbW4p6PF4enr4Nz56uTb0r66uq6iprOzoYmHprLBxrmvvbXDyMPLyNjy78PKzuHm58vIxbrIt9jS0ezk2tTSz8q5rbGil56KkbnGwMzEyL3Tw7+qv7SglZSOoJSBg5Oco7mzvrG5y9DAwa7T1d3Uzr+zwMCmoqbCv7HF0cbL0dPe19rd5enp7PDr7OPl5fz26uvQ1dXS1My30dDPz8XW0LjGw9zX1Nzb0tvs9PHp2OT8/uLczMDAxrLJxqelpJ2Kk46Rj6evt67BxsS8tbHHyNXXz7bCwLinxL2tl62poai+vsnUzMfPz8i5qZqhnqnAtc3H0bivqaibo56fkIudoajPt8zGxdnhzsK5sLSnmoSNlaSqr7mzmJqb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iJ2bn5CBf3F0iIqFZGFwbHBiamJiXnF0eG9vfoWHj4t9dX2SiX5tcmx9iWZhZVdwdWdlUEthdXVwYkJRWVtUTlJDcIF8d3hbWXZ7fWBrW3eBgYOCcGR9kI59kJB/gY6wlYWWkJ2SnbHAwMSjvbCpp6OosLKzs7GxrKmfkaKguLK+u7iytamkfYmws6+jtsLHvLmgmamnrse9u7fi3MiwraWYsb3Hv8bJsnGTnaKmpKu6u73BzdvU1tzV3tm+zt7b9/XPraqQlKKijrKtopV2coSHeWdgap6tmpKfnp+lm5SRmI2PkJeIUm+KoqaGh4+bqKbCwoxqhIaEfaOiwqq4o7q+yN/p4s7H2eLYx9G/kratubSkxM/TzOfep7urpKWinaexubvLycisppdvjpeZrLelnqGzsrSWmaO4x7elua+dwMvKycS9rrC0ur2qqrG/vb3BwsbUu7ehvb3HwLu5wNG6uLzE1NnY0cTGvrm/ysS/qqOvtbGlo62pvsG049DN3tjVxtTIz97c3uHOy9XV7v//////+u747/v//Pb56/n/9fn09vPZ3evk//7v8Pny5uT78eHV5+b0///////+/9vq6ePd1d7Y6PHz6djb7t3d6uHT6PXv8+nw+/767dfS5OPcw8TWwc/WyNLV1NjFwMa+v8bQyLnEx9vTw73Z2JbD0+fg2tnd8vLv9vf///frzcHJ4+3309i3yL7M1NXHxsvU6t7Ttc/G2Obq0dnP1M7K7PD15urlz9DavMXl4PTv4+rb3cvDu824y97d3Ofk5s3v7uvp1eHGytXg0dDh4djHzdDGw+HN7Pfkx9LZzN7cycnHxra5wcO0qLCxrKuZkpaRk5rl5ejk2svY29vs6fHf8Ozby83MxcnDwMOwl5eWobPGwr3Y4+DKuLq8x8jGurq/v8Cvqa2ovLbP4N7Hq7iYlcK6sN3L2MDY0NDUvczLtLmxub60vM2opIObqqano6ytsLHAyLnH3a+oqLW2xbm6vMbIt7DAwbO3tKi+vaKQnpunoJifusm5uK27ybKnoZ+JvNvWxrzNzdPavrXIy97qvq+orbXE28zq9fP84eTl/+/PxtrZ0szNyNLh8vbMxtjUx7THzLuq09bi0c3S5uTc3da7psLT1sbAr6+Wro6PiNDCy7fEytjfvsi/qLri7vHl3NXDwujj4MDCu7+3raibkZ2TkJiOfXmDj4N9cX6KocnX4d3Pz8/GtrG0rZ+nz8ainJJ5cG1PTC41MjMeGRoiFRcVDorP2dzr5tvGwcfL1cjDv7DDvaaVk4R8dXdyamVjXFpSUktHPj47OjQuMVljcIyhn6yppJOsrb68kY+WgJGXkZqZgICDi4iCgn6DfHlvamprYFNQX1JIREBBNjMxKykpKCQiIyIiHx8dGBQSDAUCAAAAAABz4Onk5d3Wx8fMvrLFrsC6wca6xcS3sq3l+PTk4dLJ4OXYz+PUzNHQ09TO3eHWzOzp9f3+2M3m58vg19LOwtnK2tnu3u/m3tzX1+vs4tvQzsvY0LjCwcm7ur+zqr2+sbGvr5eXmpmbkWldSVVNRUBDYIqUkKCwt7Gpys3Ow9nhzePx////+Njg6dTX7uze3ufWucHJx8LJzMXS4dLP2Nj1/P//8/rz8fv5/f/++/vh4L3m6OLK////7PD05+Pg387f2d/r09r12eDd3M3b5N3f2uju///o1cfgytjTy9fX4t3g//Lv7+/2/fv///n81Pn/5Ofp4trH08/U4Obg5ezk2c/L1NfP29bq0dfE19vR4NXu+uPc0cXZ2dvT1uHm8env+e/5//////////jw//v///T99+Lq9vj0/O3n5NPd4dHc3e7g7PX17t7p3t/n6/Du8v////fp5OLt5/f//Orr//39/v75+uTm5P////v/8vT17+vk4Org3u7g09zU5fDf5OTbzN3l8PDq3/fs7+jd09/o4tnK4tnT073L0t3k8/D75+DW0t/dz87DzsPGv8Kzvbuvqq2svq+dosK7tb3G3d3l09Pu7OXqudvg8eHPzcS6xL7UzMLFs8PJtM/MxdvR1tjOyL/Fxsi6ucHI0b/DvcfGvq26paalr73V38LWxurf5dPT3eLX18PD08e1s5q/0srBqbWhs622vdXXz9La4dHh28nd3dzZ0cLR1tPLy8je1srDvJfDwLTKzNbi1OPu5eDI0r3i9O7Swrzb3sy1yuzuybe4y/z/5unb2+Lq2MDR8fHQs8jizsaztN/kzK+7vry/yJ/E19jZxb66qru4lYnd8dDFu6O/uJyHennc1ObOtKGfjoJxTVfS3Mmvq6uoo5yZm8z19O7//+fx6O/iz/P////m4v///9TQ8P//19XCqJmUocjNzrq7paeyp5yRqsPEtqept7SeeI3Iy8GtnMzPt7GR0t/c0MrGx8XK1dHS4+rcxcDTz9ja0+Hi2ujY4NvPz8nc7urm5+PJz+Df1t/K3c/Lx8S8opuZg3rh3NDKwqmclIubutLm4Nzk5+bV4+rh4+jt6uHm5t3dy9b28N7NqZyQg3Og7Oy7sKmXjIGGfdnj1Mq70u7GqIJp6O/VqKSqioeLibXR1NTMwc3H0+Hd2+z4597G1tjd5d7C9Orl47zK2uHnycLp5dvb1NTVw8jN08Tg+/Lb2fjf5evLyOTn0ubt8vzk////5fPt6+Ph2eni2dHKy9fTvdbk4tbRus3Kw8K6vb7GxuHi5t3k1O7/////9O/l7/HZ7vDv///+1d7b083P0+Lf4t/c1czExsjCx87E0cnu+OXg2eLi0cvL0sG9s7K0mI6gvdTZ6tjJ1djRwcjJ0tDf4L60yNvk48XQ1dTu4Mvv9f/r4+Lt7Onw5ODq4eTp8+bl59jo/////+T3+eTq7PLa1/X//////u/m4Pj///7v8d714fXu9/Hw7d/M6ubWua2sqqucrbrq8/Tl1tPLx8bRz8rax87KrcPZ3c3Hvt/X3Nji6enp/vnl3dfPwcLHvs/ez+LQubOvuKOotZnL0dDVztLQ1+/9//Hw6OzRxr7NuL7Uq8XQvrS2t9TL1dzXyrvIwtLKs66EeVBKNigjYpa60+Hx9Ozp1+Tm2tvW0+fw5snd4ujz5v//////z9rp8ff07ujXyMDPvrS2qq6izc/btN7a39Ld1P////jg+f//8+jp6uLV397azdTS2urr4M3PwcjZ7PHx9fz99/78///4+/359v3s4uGutrfB0Mq5w8bJz9vm1tPq7+vp29jp9enn0tzY283Bu7zAtrCsmot6cm98f3qBeXZ7f31neHBte2NodX5pcWxwcWZ6h3t2d3SAiIqDd4GJi5mOiY6VopOVmJ+uqJqer7u/yMTAzcvR3N3a2+Hq2+f28PPk7vTYw8fDq6OVjpXN2ta+08nHvqywns7Yx66slpR8hJiZtsa8uZSZnoWBgIOusbqrl5WNj4KBfr3BvqmQbVU6QDtbqKqRgHReMiYFAAC81eTgybmxvMmuo66YqrWkpq2nrri5wePc1cnTzMjDvcDM0eLk19rWwsbPsNGy1ta7srbL3M3gztj8+/D/3Ob68v/+6vf/6O7r0P//9P/4///78fzb+///7P/////8///v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trq+zMvBtbmxpaylj623vL/CuLKqnnKAj6GnsrXEyMDArq++3NTKxrO8usG0qcTS39TJvLq3trqorcLFxMzKy8e7wsjMx8LI2M+4ta2uqrm6x7+zn5KSf3yLrqmlvczEsKSlwNLZ0MXFwsO1sbequNPM08y0qrnBvb6xscXJw6yxxMSzs8LI0tTLzL27r6OHmKq1wsC6uqSRfox0np22rqOpoam7wc7H3bq0vMfMybKyusHPy7msq663uZuPqsnIw7a9yLy7s73Kz8zXvrbArKutrLLK0MC0rZ2conqTo7vJycvDwr3O2tzeys/WyMqyo7KgpcfNz8jJ0c23rJqejqq1r6aopaifprbG0tC/pq3Ly7umrcTi3NzWz8y+wL+8sdHSsL3Av7nAt7i9y727tKW1wLCtnZu2ybSWjZGVoqSgqMG+usHP1c3Q0tHU1d3XyayksMOup62qydPYw7Oso5ubqtHDxLOz0czP1tTg4uz2//nl5uPr5Nvd6eT/+fb29vz/++zt7OTi1NzK0uLv8PPx39zf7eLh39m/vLq6usnv3NHJ1sq2qbfXxtbb5ePv7/rv9fbj7+vP0tng5/LdttLX39jLxMfAvayzwebq+fr39/Xr7uTr8e3X1be0wb+rzurc8MDHnJqxq5y1xerx8+7w9vr38unbztvr0tLW1eHm6Ovr4eXt8eXg4Ozn38m+0NHs7/bk3NC60ePu5evR2c/VzLi8vc7EzM7Kwrq5trCpv8rU3e7s5tTCwbfQ3uvk19DC4Obg19fX4+XPwre0rrPD1N7U3Nvi2uHf0tbZ6+nSwbu0qrGrqsLZz9LLxsG5qqyhoa/G2M/Qy8zQydLb2s/f4NbFvs7PyLO5zOfc0LC2r7KxqaC90trVxcTN1tTV2tjN1svLzs/IvKa4ucPOxcbDz7mwu7q6zsTEycnGwtjGu7HF2trV29DDwbauvM/Y1dvU4dzWx7ettsXP0t3S0srUv9TS6+Hg2cnIub6tt7zZwcvOv7yro5uThLrY1Onw7fTu7NPK4+jn2dbd6dPlt8/X4NXKw8i7wb2+pqjaxNnV1t7MycvL09zV38u+yKjIsr7W3eLRx7rGubnFyafExMK5p6uvqr/CwtrY2NPWzcvCvbbO3cva0cPGtrWvw7i+x+Hk4+3w7Ovy7ejj3tXOxsvIyM3Myr7KvsK/sbLHztPNyqystbS8tcvh5NHRrK+tm6OQjp3V5+PQycfS08rDx8TJutTU0dTPyMfNz8/YxLW2qZ2rrrHQ2ObXys3Hzb260uHj1M/U2d7f2tXX2NG/prmsqaGThY24ybvPu7Gwp6ifoKqvtLW2wbetnpuxwNrc0cO8vLm0wK64wNnW1sO5sKibkpKpx9DX4enn3MW9ts3h4d7JubaupJmusrS8uqufp7GvoKq0tcPOzdDLyMjHyNDk0sjGu7O4tbWyyse9ubyek5CKhnyTr7rAz83Buauksdbi3NC8uqignJ6ptcTCrqqpq6+tpaWkqKrH2N7c0c3O09DN4eDTyLuqr6ilq7G629jMuqydl5mKo7i4wsnM1NLVy7va39Pk383Oyci6rsjT2NfQwb2+u8C7tbnRytrNvaqmrr3b2fDf2NK2v6qmn6bNwtXkvtq+p8XCvMLHxM3MsLatqKvAztzYws+6uMKnpLbBt7a7rLGmjZyfiKKvwrq/yci+tru5x8zRy87K083Mw7/DzNze1MnEy8e7oNnn1M27w8PQ0MbJy93n18G1usu6p5/IzOLk3szG08zKssHLzb6zqLa2uK+8y+Xeycq+uLfEp5u+0dXHwL+2sqmlp7i5t7Owubq3u7izw93Xw7/CxcK0jYyixtzj5NvTwLSeh+Xs4NDOycjAu7Ssv9Xa3M3X0c/Nurrt8+7p2tbTx6+nn+Te3tHNztTJxr2l0tfKwL68ubKunbfi49PW1rzBwbO3nODg3NfExMXIwr3D1N7SysfN1MvBqrG5urTIu6q2s5WdmM7g0tDJ07vFsqCz2dLR0cbP1tK/o8HSzNTRtr/BxMW7uObp2srg4urw6ubf3er08Orj4+bk4dje+P////T78fXq7+vn6d7c6u349/vq5Oj///jt5N/e497Q//Lx9eft4NLYwMjq2/Hq5ufq4d/RzO3W8N/N58S+yd7axtLU5NvMx7/BxcbCwMrV6+Ha1c20wNvq19XJw8re5ejc5OL1/93s38rEw8Lv2eDp9fPr39vb1tfV4N7WydLh28fKzdfS1dfj3tTNzsW+3dnd4uPgzcvKx+Tj8fLl1M/T2efw7fX38fjf4+ni6+zY6/D68vzt7PLtzNTf4eHf0NLU0sW6yczW0MbFx8nV2tnQx9K9xMrEyc3BsdXf5+zh4u3x39nW7f337+fW1dzWv9Dc2NfU09Pa3tvOyOry49nQ0NXa28/Hz9jMzr7S1dDRyLfM7Onj3NHGzcW6x+Xm4ePd2d7k4ufJ5fXx6uPt8evo7vfb5NjT1dvV1dPNyNji5fHn5+Ll7uro5eLr2eHX29jZ387c693Z3+Hi5+XYzND4//r17u/67PfY0u/v6uPc5Ofk7vj03/Tr//Xy//j8///+/+3k3tHl6N3Y29Lf2Ofg2d3e3eDr8v//+/Pw5OHn6ebXz+Ho8+vX39XU182yztDW2c7CxL7Guqfm4dvZ39rq5ufr3dPp7ebl3tjb1NXUyK+zs8bJr76uuLKrrq2vwry/w8DFvq+krsLFwbi9vMPDsbq0vba1uKyxpJ+Rj5uorq6tsq2soJWAbYymub61qKiqs6asnJ+dqqGglZ6ej4Z9gcKsusW2sauoq6etwMfHvb68tLuqpqemtL/Mz827ucDGzs/Zz9ni7O3a4uHN2Njf6ujU4tTh0tvSzOP48Pzw8PXw4+DWv9vp8e336+Xm4dbW9+v/2dzn6NzTzsLV6ubv59vLysbFtLfH5d7W6OHe4dnU2+rl+fDp3uHd3NPT0+Xk6ebawdbdzcrB4Or77PX///7/6+/09erj6ufu6/zz+vj48vPt7O/a5NrW2ODu6uXs8urp0MPVyt3g0uDT1tTV2tDg8vrp4+Ld4d/i0rzy9PDv6uvdz8PFx/X3+eLs2djXq8i35Ojh1NnB2N7DyaL5+fLy7Ojh39zU0eLt8ePm0dzf29fd1+Te28vU2tfYzqXP3+ro8ezu6Obl2unt8N3q0tTS3N/k19Po2efi1dTM09vY0N7e6uza39be29XQ09bc1N7YzNvAzr28zce4087a1Mm5tcrV1tTPzczS0NHKx+Dc4d/bzt7d79fIw9DKxMPM5cvT49i6zNLP2tra4ujh2N7x7ePUzcy/t7e1usvc3dPDy8/QxLe8xdfY1Nfc2+Hj2MjY3tXY4sjO2cbP2dHg5s/N1MbK0sq0ytzZ2ODX08jLztHW2t3T3NTQ2OHcv8DK19/a3eHT4c3W1tvi49nT2Nfg4tDf4O/59evu6O/s6fHl2u/59/Lk3eLNzLPQ19vZ4vHu7ezq4trf3M3Jxs/d18/GzM7M1szDxcPDvau9ueTX08vPz9PRw7jJ1tzSvra5ur2vrb/P1tHMwb/Eta6nt8HX1trWytva0My/u9vh3r6zwLSypKi1ybu+xr+9v8G8sLfBzq/Jxsi+uKeUlYyPka61ub7Gv7GuqqCUjo2KiH5/g4iNfoCMjYqKhn+EfImPioKHhJWZZ2Voe3pdWmNia1ZPU1RMSURAPzM4GhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2RJY2lzamFXUlFNjJB7alxTXH2FbHOCdXFuobaxlZGFe4+SlJOdkIKnqaGVjYGBjJ2fjnh2bo6Lk5CNh4aXo6CQfXp6oY2Xm5+aiaSkq5OOhoaEoqGek5eLio2Yl5KZkomlp7CjjYilmKelo6GavMa5opKWmZ2jqbOspra5xayZm5Wruaauq624oqSZqq2ak5uak4qHfnhmX19WVVVUSVFRUU9OR0I+Oi0vJR4fIh0dJDKzx7i/vb22u7u3vdLU1szOysXa3OTV2tW469jcyeDo4dzl1tHf5uXW29Xa6enw4uHh1evP2dHk4OHg09zi4+Tx8O/h8+ro9PHu7Onl6eb04eDg3+jf3tzJ2ODh1djTuMXAw8LIxcnHzsbJy8zQycnIy8bT19TS0NLTztPP0sjJxL3Bvry4r7WysrGnppipnaefm52Rln+Df3ltZFlEQztIMjEgIBMNEwoDAAAAAAAAAACUl4x9aUxPQkSnqJF+cmVVYqadm4NqcLW6pZaJdmWQn5iTh2mWn4iAcmZpUE5yeHNtbWxecZmYiW1rYJN9dHh9eJK+s7aYkYydoZ6ckod8x8zCrpiVkpyvnKWdoJaHpq+2qYV5hq+lnaKglZKmt8W2rJufsKanoZujoL3Fya2gqZ+Zl6COjoaWipShfH1+gX+rmZOTjpKxsKewqJ+vsruxn5+erpygpJuNlrWkq6e3taqvtq6ttqHCx77Hv6u7vcS9wravrcG4xLu7v72jqqiikpydvbO+sbm3u7atrrSvrrG/xbi1qKGuoLmro7C0sLO1qLqosZiakZKTkouNg4O9ube+vLW5ta+sssfSyr66vNLQytbPyNjY5+Hg4+Pp+vf89/759fL37+rr7PHn9PTj7+r36/Ls7eHd9OHg7Nnf4eLe3trU1M/Z0tTO0M7FwMm9x8i6tqq20djJw7S6uK6praiep6+knZOfloqTjH+HdY6KiHR6fWmBb3BucnBzV11VUl1TXkc4PyUXAQAGAAAAAAAAAAAAAACHmYlaQx+Bp6uaPVahu7GThkbH3ePq3ODNvayhiHZvX7q0pqOXj6/f3dq9oIa8zbqQfIiDdIJbV02v0svDubiuqZmaalhDCQghEgAKBZ6mrI51ZpnRwKCOaquwpaGGbXHY3uTk08/NxbmjloaNz82wpJyPk9bWzcnExs/BvLauqbausqmhnYiEsrSqpamtnZ+Oj4uNiYuIkX50Z01TSywjHjRFPRQQEzxMQjsZABd4q6mhemhnaFg7LjU6ZoiEOiAseqCginBgU1VLOS8iZWtBUiwwb6m4pJuPiHhxUTItKzVSWUQ7HECQs6qThZ6Xa2loWmiJgnVZUkuKv9TLuZ+SnJiQg2JLXWZiVkZQsLzIuaqdno6IdW9zb4N5iXRYVYirs5qWk4ppdGVVV1ZMOh4pIrnT19S9p6bG3ODIl63C6OXlucGq/vz88PDy9OzfzsywyNXXz8qxj///+vXf08rX3M+0r6+jk4hoZH70/P7/7+Po6NbUy8K3v7qutayfydDUqG5qw+PQnXdhwcm6mmdoyPr/+/Hs8fXZwrmik9jfy724rqvu8+ji3+Hh287Rw8G3yc+7qa2Z4evx9uvk3NnY2MvIw7e2r6e1pamghnJkWmRjTENDM1FnaWleNLXe/ezk4N7P0b62n6matb2qkoS+6fr14e3ezcXIwLe4npB7fXfV7v/+////9PDV08zKr6Wth4zf4vH77+3f19vawLnJxbi3o5uk2+Tw5ufl4dfLsKeSlo6PgW1o0+z59Prg1dDd0cy8ubOvn5CDbnSvz8/p59vZ2NTn3dnf5urf7efy9Pfy9//t7uji7evZ8enu6+fk6+Ti083GxsO7uK61sbCvsqmtnJWmm6Kqm5aHj4aFcnB9gn1vdmxvc1p6Y3RrdWx0ioeAfXqenJWAl7rQucq7xb68ssa91MXFzNnVysTM2smzssvQtK28xM7UzMa/u7uxrrW0rrS1qMvN18/Gy7zBydDGvreoubzDwLeqrKWlnJ+di8G4vaujsbCwr6qrtrewyMHU2dXa1tLW0MW0sLvFyM3HxsXQ1NTJwcfJx8DJxsrMwMe6uLuxqo6yyMfNyLzDyr++tLrNya+otrzBu77Ty9LJxLy9zNrSysS+xsPFubm1qbbD3tvTzsbNz87Uwc3O0MTDysravq+6wcvBv8nLw8e9ycfCwcCzs7Gyuq+bwMfHwMHAvcS6t7GxpMK2sb3Cxb26qqOkp6+fsri7trW8ua6yubatnayrtrWvra2roaGun6OXrrmwuba/wsvVxK7MyMPAu9XKxL2zva6qpp6gssO+tr67wLmssKydrbGzurnAwMPCxrvBu7y8v8rJysW8w8K+u7q2tKq+wr+wtrasrqqcnJ+VlouUlY+Ympqen5ycn6CVgH2CgoSLjISKm7W3usG/u7aqn6CnqKKinJuZnKinoZ+hopubpaKZmo+anYSCY2t+ppCQjIuttbK1ucO8qsbAucfEsbW5vq2ftay1xrGrsL2zua6qq6yvo7GhqZGirKKvubDT27rW0cm8vauwfpadrr68upCTv8TUzaaok5ybpLCytMO9s7Cqrq+yrqOZo6eqppeQgZyZkoyJipyxsaORhYmbqaekrK+8v7WjpJuVl5KJhISWpKmek5CRlJKNjXqRsK+UhIFiqczP2MvMwMTOvLq/vc3JutfQ6+n/6+jV2N/c3uXf3eP4xujcwOL2+vX58/f49erp6dDh+u7h3OLk6+Lt6e/X3P7w4/D76N/y6vHp6u7r2vX97fbs7OXt2uDk5/Pu7/nr4ebk39vZ8v/58e306ejp18rO6PPw8vT39vPy7PH+7+n86ePf3czY1/7/8+zk6dvI2trU2t/l5+Dk3Ova2tfr7Ovx3NPi3tHe1+Xc3d7aycrBwL/KzNLe4+HX0LvGzsni3NfZzs/Iwt3b0uPc0LzPvcrSxbK15ejh29rb3tXW08fL7+Tk3dnY1NTU1s3W29zd5uHT0MzJzODX3NTZ0s21wMvb//rs6ejs4dDXzuf89ezl3eTW5OPZzebz6/D4+fLx5OPo6/bx3Nng6t7ctdLr5dzc1OTg0c7VucXQxc7Kzs/DutPt9ezy+fb8+/T06fv/+Pb48/bt6vHu3fLq4t/d0cvY4Onc++Xf5eTo3Mu+wefk4Obg4+Xe59rR8fPp5OPb19XOzvz/9Ofr8Nrh5t3gxunx6Obr7/v7/vHd7NXU69DM3Ojb3uvq++7z6tbw9OPx8PHp3NXZ4dPi583m5uXb1dbW4NrW1e749N3f5/Hs7eLOzv/+8PLl5eHx6uXj6PPv8/Ls8uH++vP0+v/19+nv+//+8fjt5dnlz8zO0dDT4//09+vq7ezm7+bi5/T96vHn5tnNw8rj4dfWz8bMzcnBo+fr3eHc4v3/8urn5uTx5dLTysy/zs3Gx8TEw9HFx8TDy7Ktpaqzt7bEwsbGx8eyqqi5vMC3wcC1u7i3vbS8vcLPyrmwp6SNi36aqqeuq66vq6uajY6stru2sqy7vr67ta2vt66qsKmrqJSVhYl4e3l4doaJkpecmJqSiXhyeYWCgYWLn52ho6Onpaijo6qikY2FhYqIdnl0fH15bWRwbmxzbXFtaGFbXl1YW1VPVlJWVT1EQDMpIA4CAAAAAAAAAAAAAAAAAABHyf//7/H6/vby6ODb0dK5ucDFxMXKy8Tk7+v////////w/P/99vft7eDc2dPTtung7e388vb5+Pj32dHK1tTC0djV19nW1Nrf2v3s9PX049/u4+bj1Nve3M/N1+fn4dTV387L18bPy8zNyc3h1NDO09rJ293b49zn69Pi78jY6uvk6fDq/fbx6uLw/+z/8//68f///////////////v7/8/Xy4/bp3dXS0fHx8ObCvsvHsq2/7u3w6OTi5+z71dnp9fXZ5dDj4N/l5ejd8+/l6fr5/P/t8vrh4uby6evd3eT13tzX5eXq3t/d0+Hk2NDTyNfMs9nZ6+D2///////////3+u/m3eDn6OLi2OLl5Ofv8fr14tfV5+7v7vT69/729+7j187a3efo5dfe29jY0tja7uHi3vX///f67OTS7Ovd09G7x8bG0MrX0dbV09vl5+jcyura2uLt4+LZ0+jU8Obm6ubXyNfTzdPY1NLFubWxrbq/vMzHyc3L09TQ0Njb0NnJw8vb28jDw8nX2dHMw8vIsLzM9P7/////9Obq5t3l6eC/z8TJt83B0MTY3b/OzuDFwtfX5eDW79/c4sHL2efh8enh5u3v6enr7fDt39Th1c/K1t/n8erZzNHW0dfP3ubo6+Ha2cO5sMLLzK+5vrO3t62rwOri5+3w6+3p3NXg3NbZz9HGy8uyuczMyr/L3dvPuJev1ODr4NTH0MfGw+jy6d/r5eDn5+jp6eri0dPc2NTEycLa6NfazNro2+PS4ejs7+LX29zSy9/d6Ojj29nVxNPRyOzv8/Xw3uff4dfW2Pvw8tjh69zO1OHy9vXp3Njg28Xc+Pn2+vfx//////r///////Lt7e3p6OT6/P/5+P/w+/zy3+Ho+f//8O3x3OHe29D29///9fTx5/fs8/n///3x7+jm5NXN8v7z///p7/bu7P7////17+v/5+nj+Prz9vX2//7s2tHv59Hm7en99+vq/P358vDy8+/d4ODo7u7o9eL16fH06eb/////////+e3s6PPx99rN2/7//P//+vn/+/bv9ffv8NP////07fv4//Xq+//////4//v47+fy7fP/+eTu9fbu3tn/9OXe2ePczdDT/vft5N/py9TPyd31/fDt2//+8dm25Pbz9fXq4eDi3dLn9fzt5ejVzdPO1//56eTa2dDS0c2/6uvt8O7i2ODd1sbn7fT35Nfk+ebC0NrX5NjF1drSxsC2ye369/Lg3NXNzvXu8vb16trd8dfY9OXs6d3Wx8vN3+PR5N/f3M/T0MzKzfX58/7r9e3y7O/p5PHt8PXo6OLk4dXi+enc0MnLxcnSwuLd7uPe2ObbzcfPyNrZ19TewsrOxrnl6NjZ5N7q6+3w7eTu9vz04NbSw8PG7ufy6ejw3+Pm6ebl6efr6+Pf2c7J1/ru49Lq4d7W39XY3/Dh2NHa18zRxNTq69/b19/c0tja4+vo2tLn5ers6u7c5+zp6O/07urc7+L0/f////b/9///+Pz99fzv6+Daz+LFzuHv6N7r0dHGxcH4+v////v//////f///f/89//24/Tr9//////////6+PX4////6PL+1dPS0L/h8uvp1cK/v7Kxnsfe6M/V5dDDtrWxstHMycS8ura/s7awt6+zra22v8i7srbCzr6/ubSjn7zCqZ2WoqenrcDKx8q4uL3BobG0vbevoIOPiXB2b2psg4aQfJSQnJifqLG1s6yzt7K3u8fEwrnHycvY3MzS1tfl4ermv8TQ19zf2NLZ1N3b0tPK0NjT2NjOz8SgqKGYnJyWkpuks7a3q7K/uMW+qbazz7uusbfEvbWknaWfo6GknaKXnZeNiIyMj4WKioWFiXh3c3J8dnRrbW1xc2lnamhscWNvc3VzYl1namZkZGhtdXNwa3SAgoB8go2ZlpaXn6Okt6qwt7fGxOD8+v/////9//38+Pvx5v////////fl4OH/9f/////38N7h4MjAyf//////6tPT09/e//////39/PTw7tvk+/ry4e/Oy7a7xuT98uDq7OHUzNjw//z///3x1vDs5N3Z0cLSvby7vLCuz////vzr7OHk2Na66//////w6uvw29PD38rCwsuxsaKgmtfn4+347MrW09rPwsr/////9ujg3dbQxMHPu7/Ctc+9p8DN8fD+6OXX4eTSwbm/0Pv/+vXt7e7Vy8G+xLuvrLC6mqzb3s+5yNDUs7bEysOr1eDSv720uceiqcvNzNDR0srX3N7W4ujn4Nnb5+vk8ODl2uTg4Org0ubl1evg09jg8ODWy8u7tKWPiYV5Wl9UVDs2KDZCPB4OFBIAAAAAAAAAAAAhZmV1cXuqq7Cxwr7NyM7Rx8C/ure4uLeqsLK4rKurpK2wrrjAxse8vr/Bvb22t6i2rKensq+yq62rtbSyrq+loZyam4mJgol7e3yDkIWCfXh1h4F9dnl9fnhjXWFrcWZdV11kX09IVUhEPTg2MzM8SkpHQD5AQkMuKDAsKBYDAAkCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]}; /*@@BAKED@@*/
+
+/* =====================================================================
+   Music: the song (the default one, or one the owner drops in),
+   or the microphone as a live input
+   ===================================================================== */
+const audio = {
+  el: new Audio(), ok: false, url: null, isDefault: true, name: DEFAULT_TRACK.name, lastMT: -1, lastPerf: 0,
+  ctx: null, analyser: null, mic: null, micStream: null,
+  // the microphone is heard live through an analyser; songs are analysed whole beforehand
+  ensure() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new AC({ latencyHint: 'interactive' });
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 2048;
+      this.analyser.smoothingTimeConstant = 0.55;
+      const mute = this.ctx.createGain(); mute.gain.value = 0; // keeps the analyser running without playing the mic back
+      this.analyser.connect(mute); mute.connect(this.ctx.destination);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    return this.ctx;
+  },
+  get songPlaying() { return this.ok && !this.el.paused && !this.el.ended; },
+  // song time, smoothed between the media clock's coarse updates
+  time() {
+    const mt = this.el.currentTime, now = performance.now();
+    if (mt !== this.lastMT) { this.lastMT = mt; this.lastPerf = now; }
+    return this.el.paused || this.el.ended ? mt : mt + Math.min(0.25, (now - this.lastPerf) / 1000);
+  },
+};
+audio.el.preload = 'auto';
+
+/* =====================================================================
+   Main
+   ===================================================================== */
+async function main() {
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false });
+  } catch {
+    ui.fallback.hidden = false; ui.loader.hidden = true; return;
+  }
+  if (!renderer.capabilities.isWebGL2) { ui.fallback.hidden = false; ui.loader.hidden = true; return; }
+  renderer.autoClear = false;
+  renderer.setClearColor(0x0a74ad, 1);
+  ui.stage.append(renderer.domElement);
+  const maxTex = renderer.capabilities.maxTextureSize;
+  const msaaOK = renderer.capabilities.maxSamples >= 4;
+
+  const camera = new THREE.PerspectiveCamera(VFOV, innerWidth / innerHeight, 0.04, 400);
+  camera.rotation.order = 'YXZ';
+  const scene = new THREE.Scene();
+  const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const triGeo = new THREE.BufferGeometry();
+  triGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  triGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
+  const fsMesh = (mat) => { const m = new THREE.Mesh(triGeo, mat); m.frustumCulled = false; return m; };
+
+  // ---------- shared uniforms ----------
+  // random bytes: one per texel for the noise lattice, four independent ones per texel for the tufts,
+  // little lakes and islets (all of a cell's random values in one fetch)
+  const byteTex = (data, format) => {
+    const tex = new THREE.DataTexture(data, 256, 256, format, THREE.UnsignedByteType);
+    tex.minFilter = tex.magFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const randomBytes = (n, seed) => { const rng = mulberry32(seed), out = new Uint8Array(n); for (let i = 0; i < n; i++) out[i] = Math.floor(rng() * 256); return out; };
+  const hashTex = byteTex(randomBytes(256 * 256, 20240607), THREE.RedFormat);
+  const randTex = byteTex(randomBytes(256 * 256 * 4, 20241108), THREE.RGBAFormat);
+  const S = {
+    tHash: { value: hashTex },
+    tRand: { value: randTex },
+    uWaterBias: { value: 0.13 },   // big lakes a little smaller: the little lakes and islets carry the water now
+    uWindDir: { value: new THREE.Vector2(0.94, -0.34).normalize() },
+    uWindOff: { value: new THREE.Vector2() },
+    uWindAmp: { value: 0.6 },
+    uGusts: { value: Array.from({ length: 6 }, () => new THREE.Vector4(-999, 0, 6, 0)) },
+    uCam: { value: new THREE.Vector3(0, EYE, 0) },
+    uTime: { value: 0 },
+    uOne: { value: 1 },
+  };
+
+  // ---------- the mountain panorama, all the way round (rendered once, a strip at a time) ----------
+  // Six bands of 60° of azimuth are stacked in one texture. Each band carries a margin of its
+  // neighbours' view at both sides, so sampling across a band's edge never shows a seam, and a gutter
+  // keeps the mipmaps of one band from bleeding into the next. The bands facing the first view are
+  // painted before the meadow appears; the rest follow a strip per frame.
+  const pano = (() => {
+    const NB = 6, BAND = TAU / NB, EL0 = -0.5 * DEG, EL1 = 15 * DEG, PADX = 16, GUT = 16;
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: FS_VERT, fragmentShader: PANO_FRAG, depthTest: false, depthWrite: false,
+      uniforms: { uPanoMin: { value: new THREE.Vector2() }, uPanoMax: { value: new THREE.Vector2() }, uSun: { value: SUN }, uPixAng: { value: 0.001 }, uOne: { value: 1 } },
+    });
+    const sc = new THREE.Scene(); sc.add(fsMesh(mat));
+    const st = {
+      rt: null, w: 1, h: 1, bandH: 1, margin: 0, pxPerRad: 1, jobs: [], next: 0, front: 0, done: false, material: mat, scene: sc,
+      A: new THREE.Vector4(BAND, 0, EL0, EL1), B: new THREE.Vector4(1, 1, 0, NB),
+    };
+    const angDist = (a, b) => Math.abs(((a - b + 3 * Math.PI) % TAU) - Math.PI);
+    st.setup = (pxPerRad, firstYaw = 0) => {
+      const lim = Math.min(maxTex, 8192);   // fit the atlas in the GPU's limit
+      pxPerRad = Math.min(pxPerRad, (lim - 2 * PADX) / BAND, (lim / NB - GUT) / (EL1 - EL0));
+      st.pxPerRad = pxPerRad;
+      st.w = Math.round(pxPerRad * BAND) + 2 * PADX;
+      st.margin = PADX / pxPerRad;
+      st.bandH = Math.round(pxPerRad * (EL1 - EL0));
+      st.h = NB * (st.bandH + GUT);
+      if (st.rt) st.rt.dispose();
+      st.rt = new THREE.WebGLRenderTarget(st.w, st.h, {
+        depthBuffer: false, type: THREE.UnsignedByteType, generateMipmaps: true,
+        minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+      });
+      st.rt.scissorTest = true;
+      mat.uniforms.uPixAng.value = 1 / pxPerRad;
+      st.A.set(BAND, st.margin, EL0, EL1);
+      st.B.set(st.bandH / st.h, (st.bandH + GUT) / st.h, GUT / 2 / st.h, NB);
+      // jobs: strips of each band, nearest the first view first (azimuth -firstYaw: yaw turns left)
+      const per = Math.max(4, Math.ceil((st.w * st.bandH) / 120000));
+      const center = (b) => -Math.PI + (b + 0.5) * BAND;
+      const order = [...Array(NB).keys()].sort((a, b) => angDist(center(a), -firstYaw) - angDist(center(b), -firstYaw));
+      st.jobs = [];
+      for (const b of order) for (let s = 0; s < per; s++) st.jobs.push({ b, s, per });
+      st.front = 2 * per;
+      st.next = 0; st.done = false;
+      // unpainted bands read as clear sky
+      const cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha();
+      renderer.setRenderTarget(st.rt); renderer.setClearColor(0x000000, 0); renderer.clear(true, false, false);
+      renderer.setRenderTarget(null); renderer.setClearColor(cc, ca);
+    };
+    st.step = () => {
+      if (st.done) return true;
+      const { b, s, per } = st.jobs[st.next];
+      const y0 = b * (st.bandH + GUT) + GUT / 2;
+      const x0 = Math.floor((s * st.w) / per), x1 = Math.floor(((s + 1) * st.w) / per);
+      mat.uniforms.uPanoMin.value.set(-Math.PI + b * BAND - st.margin, EL0);
+      mat.uniforms.uPanoMax.value.set(-Math.PI + (b + 1) * BAND + st.margin, EL1);
+      st.rt.viewport.set(0, y0, st.w, st.bandH);
+      st.rt.scissor.set(x0, y0, x1 - x0, st.bandH);
+      // the mipmaps are rebuilt only when a band is finished
+      st.rt.texture.generateMipmaps = s === per - 1;
+      renderer.setRenderTarget(st.rt); renderer.render(sc, fsCam); renderer.setRenderTarget(null);
+      st.next++;
+      if (st.next >= st.jobs.length) st.done = true;
+      return st.done;
+    };
+    st.frontReady = () => st.next >= st.front;
+    return st;
+  })();
+
+  // ---------- background: sky, clouds, meadow, lakes ----------
+  const bgMat = new THREE.ShaderMaterial({
+    vertexShader: BG_VERT, fragmentShader: BG_FRAG, depthTest: false, depthWrite: false,
+    uniforms: {
+      ...S,
+      uCamMat: { value: camera.matrixWorld },
+      uTanHalf: { value: new THREE.Vector2(1, 1) },
+      tPano: { value: null },
+      uPanoA: { value: pano.A }, uPanoB: { value: pano.B }, uPanoLod: { value: 0 }, uSun: { value: SUN },
+      uPixAng: { value: 0.0005 },
+      uCloudT: { value: 0 },
+      uSparkle: { value: 0.5 },
+      uHaze: { value: new THREE.Vector3(0.82, 0.85, 0.77) },
+      uDebug: { value: 0 },
+      uMapRes: { value: new THREE.Vector2(1, 1) },
+    },
+  });
+  const bg = fsMesh(bgMat); bg.renderOrder = -10;
+  scene.add(bg);
+
+  // ---------- grass and flowers near the camera ----------
+  const vegU = { uTile: { value: TILE }, uCenter: { value: new THREE.Vector2() } };
+  const grassMat = new THREE.ShaderMaterial({
+    vertexShader: GRASS_VERT, fragmentShader: GRASS_FRAG, side: THREE.DoubleSide,
+    uniforms: { ...S, ...vegU, uFade: { value: new THREE.Vector2(22, 31) } },
+  });
+  const flowerMat = new THREE.ShaderMaterial({
+    vertexShader: FLOWER_VERT, fragmentShader: FLOWER_FRAG,
+    uniforms: { ...S, ...vegU, uFade: { value: new THREE.Vector2(21, 30) } },
+  });
+  const petalU = { uPetalOff: { value: new THREE.Vector2() }, uPetalC: { value: new THREE.Vector3(0, 0, -9) }, uShow: { value: 0.3 } };
+  const petalMat = new THREE.ShaderMaterial({
+    vertexShader: PETAL_VERT, fragmentShader: PETAL_FRAG,
+    uniforms: { uCam: S.uCam, uWindDir: S.uWindDir, uTime: S.uTime, ...petalU },
+  });
+  const COUNTS = { high: { grass: 120000, flowers: 32000, petals: 700 }, low: { grass: 50000, flowers: 14000, petals: 350 } };
+  const grass = new THREE.Mesh(bladeGeometry(COUNTS.high.grass, 7), grassMat);
+  const flowers = new THREE.Mesh(quadGeometry(COUNTS.high.flowers, 11), flowerMat);
+  const petals = new THREE.Mesh(quadGeometry(COUNTS.high.petals, 13), petalMat);
+  for (const m of [grass, flowers, petals]) { m.frustumCulled = false; scene.add(m); }
+
+  // ---------- post ----------
+  const finalMat = new THREE.ShaderMaterial({
+    vertexShader: FS_VERT, fragmentShader: FINAL_FRAG, depthTest: false, depthWrite: false,
+    uniforms: { tScene: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: S.uTime, uBreath: { value: 0 } },
+  });
+  const finalScene = new THREE.Scene(); finalScene.add(fsMesh(finalMat));
+  let sceneRT = null;
+
+  // ---------- quality & sizing ----------
+  const QUALITY = { high: { maxPR: 1.5, msaa: true }, low: { maxPR: 1.0, msaa: false } };
+  let activeQ = settings.quality === 'low' ? 'low' : 'high', resScale = 1, curPR = 1;
+  function resize() {
+    const Q = QUALITY[activeQ], w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+    const maxPx = activeQ === 'high' ? 2.4e6 : 1.4e6;
+    curPR = Math.max(0.5, Math.min(Math.min(devicePixelRatio || 1, Q.maxPR) * resScale, Math.sqrt(maxPx / (w * h))));
+    renderer.setPixelRatio(curPR); renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    const W = Math.max(1, Math.floor(w * curPR)), H = Math.max(1, Math.floor(h * curPR));
+    if (sceneRT) sceneRT.dispose();
+    sceneRT = new THREE.WebGLRenderTarget(W, H, { samples: Q.msaa && msaaOK ? 4 : 0, type: THREE.UnsignedByteType, depthBuffer: true });
+    finalMat.uniforms.tScene.value = sceneRT.texture;
+    finalMat.uniforms.uRes.value.set(W, H);
+    const tanV = Math.tan((VFOV * DEG) / 2);
+    bgMat.uniforms.uTanHalf.value.set(tanV * camera.aspect, tanV);
+    const pxPerRad = H / (VFOV * DEG);
+    bgMat.uniforms.uPixAng.value = 1 / pxPerRad;
+    bgMat.uniforms.uPanoLod.value = Math.max(0, Math.log2(pano.pxPerRad / pxPerRad));
+  }
+  function applyQuality() {
+    const C = COUNTS[activeQ];
+    grass.geometry.instanceCount = C.grass; flowers.geometry.instanceCount = C.flowers; petals.geometry.instanceCount = C.petals;
+    resize();
+  }
+
+  // ---------- live music (the microphone) ----------
+  const music = { bass: 0, mid: 0, high: 0, level: 0, beat: 0, bassAvg: 0, lastOnset: -9, peak: { b: 0.2, m: 0.15, h: 0.08 } };
+  let freq = null;
+  function band(f0, f1, hz) {
+    let s = 0, n = 0;
+    const i0 = Math.max(1, Math.floor(f0 / hz)), i1 = Math.min(freq.length - 1, Math.ceil(f1 / hz));
+    for (let i = i0; i <= i1; i++) { s += freq[i]; n++; }
+    return n ? s / n / 255 : 0;
+  }
+  function analyse(dt, now) {
+    const k = (rate) => 1 - Math.exp(-dt * rate);
+    if (app.mode !== 'mic' || !audio.analyser) {
+      music.bass = lerp(music.bass, 0, k(2)); music.mid = lerp(music.mid, 0, k(2));
+      music.high = lerp(music.high, 0, k(2)); music.level = lerp(music.level, 0, k(1.5));
+      music.beat *= Math.exp(-dt * 4);
+      return;
+    }
+    if (!freq || freq.length !== audio.analyser.frequencyBinCount) freq = new Uint8Array(audio.analyser.frequencyBinCount);
+    audio.analyser.getByteFrequencyData(freq);
+    const hz = audio.ctx.sampleRate / audio.analyser.fftSize;
+    const b = band(35, 150, hz), m = band(300, 2200, hz), h = band(4000, 12000, hz);
+    const P = music.peak, decay = Math.exp(-dt / 8);
+    P.b = Math.max(b, P.b * decay, 0.06); P.m = Math.max(m, P.m * decay, 0.05); P.h = Math.max(h, P.h * decay, 0.03);
+    const nb = b / P.b, nm = m / P.m, nh = h / P.h;
+    music.bass = lerp(music.bass, nb, k(14));
+    music.mid = lerp(music.mid, nm, k(6));
+    music.high = lerp(music.high, nh, k(10));
+    music.level = lerp(music.level, (nb + nm + nh) / 3, k(1.2));
+    const flux = nb - music.bassAvg;
+    music.bassAvg = lerp(music.bassAvg, nb, k(5));
+    if (flux > 0.1 && nb > 0.5 && now - music.lastOnset > 0.27) { music.lastOnset = now; onBeat(clamp(0.35 + flux * 2.2, 0.35, 1)); }
+    music.beat *= Math.exp(-dt * 4.5);
+  }
+
+  // ---------- wind gusts ----------
+  // Fronts travel along the wind. While the song plays, the director places them; otherwise each one
+  // coasts on, and a new one comes now and then (or on each beat the microphone hears).
+  const gusts = S.uGusts.value.map(() => ({ x: -999, a: 0, w: 6, v: 12 }));
+  let petalBurst = 0, nextAutoGust = 2;
+  function spawnGust(strength) {
+    let g = gusts[0];
+    for (const c of gusts) if (c.a < g.a) g = c;
+    g.x = GUST_FROM; g.a = strength; g.w = 4 + strength * 4; g.v = 14 + strength * 8;   // enters at the left edge of view
+  }
+  function onBeat(s) {
+    music.beat = Math.max(music.beat, s);
+    spawnGust(0.45 + s * 0.85);
+    if (s > 0.75) petalBurst = Math.min(1, petalBurst + 0.35);
+  }
+
+  // ---------- the glide, and where we look ----------
+  // Drag (or hold the arrow keys) to look around; the glide turns to follow wherever we look. Left
+  // alone for a while, the view wanders slowly on its own. Yaw grows to the left (three.js convention).
+  const IDLE_SPEED = 0.5;   // m/s with no music
+  const PITCH_MIN = -0.36, PITCH_MAX = 0.42;
+  const camState = { x: 0, z: 0, yaw: 0, pitch: 0, heading: 0, v: IDLE_SPEED, yawVel: 0, lastInput: -1e9, lastTilt: -1e9 };
+  const steer = { dragging: false, id: -1, x: 0, y: 0, moved: 0, t0: 0, vx: 0, lastT: 0, keys: new Set() };
+  const wrapPI = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
+  const fwd = new THREE.Vector2();
+  function updateCamera(dt, T, vTarget) {
+    const c = camState, now = performance.now(), ease = (r) => 1 - Math.exp(-dt * r);
+    if (!steer.dragging) {
+      const turn = (steer.keys.has('left') ? 1 : 0) - (steer.keys.has('right') ? 1 : 0);
+      const tilt = (steer.keys.has('up') ? 1 : 0) - (steer.keys.has('down') ? 1 : 0);
+      if (turn) c.yawVel = lerp(c.yawVel, turn * 1.1, ease(5));
+      else if (now - c.lastInput > 20000 && !reduceMotion) c.yawVel = lerp(c.yawVel, 0.03 * Math.sin(T * 0.045 + 1.3) + 0.012 * Math.sin(T * 0.11), ease(0.4));
+      else c.yawVel *= Math.exp(-dt * 4.5);            // a flung view coasts briefly to a stop
+      c.yaw = wrapPI(c.yaw + c.yawVel * dt);
+      if (tilt) c.pitch = clamp(c.pitch + tilt * 0.6 * dt, PITCH_MIN, PITCH_MAX);
+      else if (now - c.lastTilt > 2500) c.pitch *= Math.exp(-dt * 0.5);   // the gaze settles back on the horizon
+    }
+    // the glide follows the view, a little behind it
+    c.heading = wrapPI(c.heading + wrapPI(c.yaw - c.heading) * ease(0.9));
+    c.v = lerp(c.v, vTarget, ease(2.5));
+    c.x -= Math.sin(c.heading) * c.v * dt;
+    c.z -= Math.cos(c.heading) * c.v * dt;
+    // the meadow repeats every PERIOD metres both ways: stay near the middle of it
+    if (c.x < -PERIOD / 2) c.x += PERIOD; else if (c.x >= PERIOD / 2) c.x -= PERIOD;
+    if (c.z < -PERIOD / 2) c.z += PERIOD; else if (c.z >= PERIOD / 2) c.z -= PERIOD;
+    const yaw = c.yaw + (reduceMotion ? 0 : 0.035 * Math.sin(T * 0.031) + 0.015 * Math.sin(T * 0.077 + 1));
+    const bob = reduceMotion ? 0 : 0.035 * Math.sin(T * 0.43) + 0.015 * Math.sin(T * 1.1);
+    camera.position.set(c.x, EYE + bob, c.z);
+    camera.rotation.set(PITCH + c.pitch + (reduceMotion ? 0 : 0.004 * Math.sin(T * 0.21)), yaw, reduceMotion ? 0 : 0.006 * Math.sin(T * 0.17));
+    camera.updateMatrixWorld();
+    S.uCam.value.copy(camera.position);
+    fwd.set(-Math.sin(yaw), -Math.cos(yaw));
+    vegU.uCenter.value.set(c.x + fwd.x * 20, c.z + fwd.y * 20);
+    petalU.uPetalC.value.set(c.x + fwd.x * 9, 0, c.z + fwd.y * 9);
+    // the wind blows across our way, from the left, so its gusts sweep the view left to right
+    const hs = Math.sin(c.heading), hc = Math.cos(c.heading);
+    S.uWindDir.value.set(0.94 * hc - 0.34 * hs, -0.94 * hs - 0.34 * hc);
+  }
+
+  // ---------- frame ----------
+  // app.mode: 'intro' (waiting for the first click), 'play' (the song, or the owner paused it), 'end', 'mic'
+  const app = { frozen: false, mode: 'intro', analysis: null, dir: null, forcedT: null, ready: null, endTimer: 0, owner: false, shownSec: -1 };
+  const songTime = () => (app.forcedT != null ? app.forcedT : audio.time());
+  const clock = { cloudT: 0, windOff: new THREE.Vector2(), petalOff: new THREE.Vector2() };
+  let last = performance.now(), started = false;
+  const ft = { acc: 0, n: 0, lastCheck: performance.now(), slow: 0 };
+  function adaptQuality(dt, now) {
+    ft.acc += dt; ft.n++;
+    if (now - ft.lastCheck < 2000) return;
+    const avg = ft.acc / ft.n; ft.acc = 0; ft.n = 0; ft.lastCheck = now;
+    if (document.hidden || app.frozen) return;
+    let changed = false;
+    if (avg > 0.024 && resScale > 0.6) { resScale = Math.max(0.6, resScale * 0.85); changed = true; }
+    else if (avg < 0.0175 && resScale < 1) { resScale = Math.min(1, resScale * 1.1); changed = true; }
+    if (avg > 0.03 && resScale <= 0.6 && settings.quality === 'auto' && activeQ === 'high') {
+      ft.slow++;
+      if (ft.slow >= 2) { activeQ = 'low'; resScale = 1; applyQuality(); renderQuality(); return; }
+    } else ft.slow = 0;
+    if (changed) resize();
+  }
+  function step(now, dtOverride) {
+    const dt = dtOverride ?? Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    const T = now / 1000;
+    analyse(dt, T);
+    const windK = settings.wind, ease = (rate) => 1 - Math.exp(-dt * rate);
+    let windAmp, vTarget, petalShow, windRate, petalRate;
+    if (app.mode === 'play' && app.dir && (audio.songPlaying || app.forcedT != null)) {
+      // the song: everything follows the director at this moment of the music
+      const t = songTime(), f = app.dir.at(t);
+      app.dir.gustsAt(t, gusts);
+      windAmp = f.windAmp;
+      windRate = f.windRate * Math.max(0.2, windK);
+      clock.cloudT += dt * (reduceMotion ? 0.4 : f.cloudRate);
+      petalBurst = f.swell;   // carries on fading if the song is paused
+      petalRate = 1.2 + (f.petalRate - 1.2) * windK;
+      petalShow = f.petalShow * (reduceMotion ? 0.6 : 1);
+      bgMat.uniforms.uSparkle.value = f.sparkle;
+      finalMat.uniforms.uBreath.value = reduceMotion ? 0 : f.breath;
+      vTarget = reduceMotion ? Math.min(0.5, f.speed) : f.speed;
+      if (app.forcedT == null && t >= app.analysis.duration - 0.05) endSong();
+    } else {
+      // no song playing: the meadow keeps a breeze of its own (or follows the microphone)
+      if (app.mode !== 'mic') {
+        nextAutoGust -= dt;
+        if (nextAutoGust <= 0) { spawnGust(0.3 + Math.random() * 0.35); nextAutoGust = 2.5 + Math.random() * 4; }
+      }
+      for (const g of gusts) { g.x += g.v * dt; g.a *= Math.exp(-dt * 0.2); if (g.x > 260) g.a = 0; }
+      windAmp = 0.5 + 0.55 * music.bass + 0.25 * music.level;
+      windRate = (2.5 + 4 * music.level + 2 * music.beat) * Math.max(0.2, windK);
+      clock.cloudT += dt * (reduceMotion ? 0.4 : 1 + 1.4 * music.mid + 2.2 * music.beat);
+      petalBurst = Math.max(0, petalBurst - dt * 0.12);
+      petalRate = 1.6 + 3.5 * windK * (0.4 + music.level + petalBurst);
+      petalShow = 0.18 + 0.3 * music.level + 0.6 * petalBurst;
+      bgMat.uniforms.uSparkle.value = 0.45 + 0.8 * music.high + 0.4 * music.beat;
+      finalMat.uniforms.uBreath.value = music.beat;
+      vTarget = reduceMotion ? 0.35 : app.mode === 'mic' ? 1.35 + 1.1 * music.level + 0.6 * music.beat : app.mode === 'end' ? END_SPEED : IDLE_SPEED;
+    }
+    S.uGusts.value.forEach((u, i) => u.set(gusts[i].x, gusts[i].a * windK, gusts[i].w, 0));
+    // eased, so a change of mode (the first click, a pause) never jolts the grass or pops petals away
+    S.uWindAmp.value = lerp(S.uWindAmp.value, windK * windAmp, dtOverride === 0 ? 1 : ease(6));
+    petalU.uShow.value = lerp(petalU.uShow.value, clamp(petalShow, 0, 1), dtOverride === 0 ? 1 : ease(4));
+    // the breeze and the petals drift along the wind, wherever it now blows from
+    const wd = S.uWindDir.value;
+    clock.windOff.addScaledVector(wd, dt * windRate);
+    clock.windOff.set(((clock.windOff.x % PERIOD) + PERIOD) % PERIOD, ((clock.windOff.y % PERIOD) + PERIOD) % PERIOD);
+    S.uWindOff.value.copy(clock.windOff);
+    clock.petalOff.addScaledVector(wd, dt * petalRate);
+    if (Math.abs(clock.petalOff.x) > 4400 || Math.abs(clock.petalOff.y) > 4400) clock.petalOff.set(0, 0);
+    bgMat.uniforms.uCloudT.value = clock.cloudT;
+    petalU.uPetalOff.value.copy(clock.petalOff);
+    S.uTime.value = T % 3600;
+    updateCamera(dt, T, vTarget * settings.speed);
+    if (app.owner) renderClock();
+    if (!app.frozen) adaptQuality(dt, now);
+    renderer.setRenderTarget(sceneRT); renderer.clear(true, true, false);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(finalScene, fsCam);
+  }
+  function reveal(now) {
+    bgMat.uniforms.tPano.value = pano.rt.texture;
+    resize();
+    started = true; last = now;
+    step(now, 0);
+    renderer.domElement.classList.add('in');
+    ui.loader.classList.add('out');
+    setTimeout(() => { ui.loader.hidden = true; }, 1000);
+    // Start the song straight away if the browser allows it: it does once the visitor has clicked anywhere
+    // on this site (the VJ menu's click carries over to the VJ it opens), or plays sound here often.
+    // Otherwise begin() asks for a click.
+    begin();
+  }
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!started) {
+      if (!compiled) return;   // shaders still compiling in the background
+      // paint the mountains facing us a strip at a time, then reveal the meadow
+      pano.step();
+      ui.loaderPct.textContent = ` · ${Math.round((Math.min(pano.next, pano.front) / pano.front) * 100)}%`;
+      if (pano.frontReady()) reveal(now);
+      return;
+    }
+    if (!pano.done) pano.step();   // the rest of the way round, a strip per frame
+    if (!app.frozen) step(now);
+  }
+
+  // ---------- the song: loading, starting, ending ----------
+  const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+  const startHint = (again) => hint(`${coarse ? 'Tap' : 'Click'} anywhere to ${again ? 'play again' : 'begin'}`, 0, true);
+  function setSong(an) { app.analysis = an; app.dir = an ? buildDirector(an) : null; }
+  async function loadDefault() {
+    audio.isDefault = true; audio.name = DEFAULT_TRACK.name;
+    if (audio.url) { URL.revokeObjectURL(audio.url); audio.url = null; }
+    const el = audio.el;
+    audio.ok = await new Promise((res) => {
+      const done = (v) => { el.removeEventListener('loadedmetadata', yes); el.removeEventListener('error', no); res(v); };
+      const yes = () => done(true), no = () => done(false);
+      el.addEventListener('loadedmetadata', yes); el.addEventListener('error', no);
+      el.src = encodeURI(DEFAULT_TRACK.url); el.load();
+    });
+    if (!audio.ok) return null;
+    if (BAKED) return unpackAnalysis(BAKED);
+    // not baked into the page yet: decode and analyse it here (works when the page is served over http)
+    try {
+      const buf = await (await fetch(encodeURI(DEFAULT_TRACK.url))).arrayBuffer();
+      const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+      return await analyzeAudio(await ctx.decodeAudioData(buf));
+    } catch { return null; }
+  }
+  let starting = false;
+  // resolves true once the song is playing; false if the browser wants a click first (then the hint asks for one)
+  async function begin() {
+    if (starting || !started || app.mode === 'play') return false;
+    starting = true;
+    try {
+      const an = await app.ready;
+      if (!an || !audio.ok) { toast('The song couldn’t be loaded here. Open the page from the VJ site or a local server.', 5000); return false; }
+      stopMic();
+      clearTimeout(app.endTimer);
+      audio.el.currentTime = 0; audio.lastMT = -1;
+      app.mode = 'play';
+      ui.hint.classList.remove('in');
+      await audio.el.play();
+      // once: tell people they can look around
+      if (!app.lookHinted) {
+        app.lookHinted = true;
+        setTimeout(() => { if (app.mode === 'play' && performance.now() - camState.lastInput > 4000) hint(coarse ? 'Drag to look around' : 'Drag, or use the arrow keys, to look around', 5000); }, 4500);
+      }
+      return true;
+    } catch {
+      app.mode = 'intro'; startHint();
+      return false;
+    } finally { starting = false; renderTrack(); }
+  }
+  function endSong() {
+    if (app.mode !== 'play') return;
+    app.mode = 'end';
+    clearTimeout(app.endTimer);
+    app.endTimer = setTimeout(() => { if (app.mode === 'end') startHint(true); }, 2500);
+    renderTrack();
+  }
+  audio.el.addEventListener('ended', endSong);
+  async function loadFile(file) {
+    if (!file) return;
+    toast('Listening to the song…', 60000);
+    try {
+      const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+      const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+      const an = await analyzeAudio(buf, (p) => { ui.toast.textContent = `Listening to the song… ${Math.round(p * 100)}%`; });
+      stopMic(); audio.el.pause();
+      if (audio.url) URL.revokeObjectURL(audio.url);
+      audio.url = URL.createObjectURL(file); audio.isDefault = false; audio.name = prettyName(file.name);
+      audio.el.src = audio.url; audio.ok = true;
+      setSong(an); app.ready = Promise.resolve(an);
+      app.mode = 'intro';
+      toast(`${audio.name} · ${fmtTime(an.duration)} · ${app.dir.meter === 3 ? 'waltz time' : Math.round(an.bpm) + ' BPM'}`, 3500);
+      begin();
+    } catch {
+      toast('This browser can’t read that file. Try an MP3, M4A or WAV.', 4000);
+    }
+  }
+  async function useDefault() {
+    if (audio.isDefault) return;
+    audio.el.pause(); stopMic(); app.mode = 'intro';
+    app.ready = loadDefault().then((an) => { setSong(an); return an; });
+    await app.ready;
+    renderTrack(); begin();
+  }
+
+  // ---------- start ----------
+  // the panorama is built for the biggest view this screen can show (so fullscreen stays sharp)
+  const screenPx = Math.min(2400, Math.max(innerHeight, (screen && screen.height) || 0, 720) * Math.min(devicePixelRatio || 1, 1.5));
+  pano.setup((screenPx / (VFOV * DEG)) * (activeQ === 'high' ? 1.3 : 1.0));
+  applyQuality();
+  updateCamera(0, 0, IDLE_SPEED);
+  addEventListener('resize', resize);
+  // compile every shader off the main thread where the browser can (the loader keeps breathing meanwhile)
+  let compiled = false;
+  Promise.all([
+    renderer.compileAsync(scene, camera),
+    renderer.compileAsync(pano.scene, fsCam),
+    renderer.compileAsync(finalScene, fsCam),
+  ]).catch(() => { /* fall back to compiling on first use */ }).then(() => { compiled = true; });
+  app.ready = loadDefault().then((an) => { setSong(an); renderTrack(); return an; });
+  requestAnimationFrame(frame);
+
+  // ---------- controls ----------
+  function prettyName(name) { return String(name || '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ').trim(); }
+  function fmtTime(s) { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+  function renderClock() {
+    const t = app.mode === 'mic' ? -1 : Math.floor(songTime());
+    if (t === app.shownSec) return;
+    app.shownSec = t;
+    ui.clock.textContent = t < 0 || !app.analysis ? '' : `${fmtTime(t)} / ${fmtTime(app.analysis.duration)}`;
+  }
+  function renderTrack() {
+    ui.track.textContent = app.mode === 'mic' ? 'Listening to the microphone' : audio.ok ? `♪ ${audio.name}` : 'The song couldn’t be loaded';
+    ui.playBtn.textContent = app.mode === 'play' && audio.songPlaying ? 'Pause' : 'Play';
+    ui.micBtn.setAttribute('aria-pressed', String(app.mode === 'mic'));
+    ui.defaultBtn.hidden = audio.isDefault;
+    app.shownSec = -2; renderClock();
+  }
+  function stopMic() {
+    if (audio.micStream) { audio.micStream.getTracks().forEach((t) => t.stop()); audio.micStream = null; }
+    if (audio.mic) { try { audio.mic.disconnect(); } catch { /* already gone */ } audio.mic = null; }
+    if (app.mode === 'mic') app.mode = 'intro';
+  }
+  async function toggleMic() {
+    if (app.mode === 'mic') { stopMic(); renderTrack(); toast('Microphone off'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('This browser can’t open the microphone here'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      audio.el.pause();
+      const ctx = audio.ensure();
+      stopMic();
+      audio.micStream = stream;
+      audio.mic = ctx.createMediaStreamSource(stream);
+      audio.mic.connect(audio.analyser);
+      app.mode = 'mic';
+      clearTimeout(app.endTimer); ui.hint.classList.remove('in');
+      renderTrack();
+      toast('Listening: the meadow follows the room’s music');
+    } catch {
+      toast('The microphone was blocked or isn’t available');
+    }
+  }
+  function togglePlay() {
+    if (app.mode !== 'play') { begin(); return; }
+    if (audio.el.paused) audio.el.play().catch(() => {}); else audio.el.pause();
+  }
+  function seekBy(ds) {
+    if (!audio.ok || !app.analysis || app.mode === 'mic') return;
+    audio.el.currentTime = clamp(songTime() + ds, 0, app.analysis.duration - 0.05); audio.lastMT = -1;
+    if (app.mode !== 'play') { app.mode = 'play'; clearTimeout(app.endTimer); ui.hint.classList.remove('in'); audio.el.play().catch(() => {}); }
+    renderTrack();
+  }
+  function toggleFullscreen() {
+    const el = document.documentElement;
+    if (!document.fullscreenElement) (el.requestFullscreen ? el.requestFullscreen() : Promise.reject()).catch(() => toast('Fullscreen isn’t available here'));
+    else document.exitFullscreen().catch(() => {});
+  }
+  function setOwner(on) { app.owner = on; document.body.classList.toggle('dev', on); renderTrack(); }
+  function renderQuality() { for (const b of ui.qBtns) b.setAttribute('aria-pressed', String(b.dataset.q === settings.quality)); }
+  ui.wind.value = settings.wind; ui.speed.value = settings.speed;
+  ui.wind.addEventListener('input', () => { settings.wind = +ui.wind.value; store.set('wind', settings.wind); });
+  ui.speed.addEventListener('input', () => { settings.speed = +ui.speed.value; store.set('speed', settings.speed); });
+  for (const b of ui.qBtns) b.addEventListener('click', () => {
+    settings.quality = b.dataset.q; store.set('quality', settings.quality);
+    activeQ = settings.quality === 'low' ? 'low' : 'high'; resScale = 1; applyQuality(); renderQuality();
+  });
+  renderQuality(); renderTrack();
+  audio.el.addEventListener('play', renderTrack); audio.el.addEventListener('pause', renderTrack);
+  ui.fileBtn.addEventListener('click', () => ui.fileInput.click());
+  ui.fileInput.addEventListener('change', () => { const f = ui.fileInput.files && ui.fileInput.files[0]; ui.fileInput.value = ''; if (f) loadFile(f); });
+  ui.defaultBtn.addEventListener('click', useDefault);
+  ui.playBtn.addEventListener('click', togglePlay);
+  ui.micBtn.addEventListener('click', toggleMic);
+
+  // the owner can drop another song in; for everyone else a drop just does nothing (the page stays put)
+  const isAudio = (f) => /^audio\//.test(f.type) || /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm)$/i.test(f.name);
+  addEventListener('dragover', (e) => { e.preventDefault(); });
+  addEventListener('dragenter', (e) => { e.preventDefault(); if (app.owner) hint('Drop the song to play it', 2500); });
+  addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!app.owner) return;
+    const f = [...(e.dataTransfer ? e.dataTransfer.files : [])].find(isAudio);
+    if (f) loadFile(f); else toast('Drop an audio file: MP3, M4A, WAV, OGG or FLAC');
+  });
+  // ---------- looking around: drag anywhere (a click without dragging starts the song) ----------
+  const DRAG = 0.0042;   // radians per pixel dragged: grab the view and pull it
+  const touched = (tilt) => { camState.lastInput = performance.now(); if (tilt) camState.lastTilt = camState.lastInput; };
+  addEventListener('pointerdown', (e) => {
+    if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {});
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest('#panel'))) return;
+    const now = performance.now();
+    Object.assign(steer, { dragging: true, id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t0: now, vx: 0, lastT: now });
+    camState.yawVel = 0;
+    touched(false);
+  });
+  addEventListener('pointermove', (e) => {
+    if (!steer.dragging || e.pointerId !== steer.id) return;
+    const dx = e.clientX - steer.x, dy = e.clientY - steer.y, now = performance.now();
+    steer.x = e.clientX; steer.y = e.clientY; steer.moved += Math.abs(dx) + Math.abs(dy);
+    camState.yaw = wrapPI(camState.yaw + dx * DRAG);
+    camState.pitch = clamp(camState.pitch + dy * DRAG, PITCH_MIN, PITCH_MAX);
+    steer.vx = lerp(steer.vx, (dx * DRAG) / (Math.max(1, now - steer.lastT) / 1000), 0.4);   // for the fling
+    steer.lastT = now;
+    touched(dy !== 0);
+  });
+  const endDrag = (e) => {
+    if (!steer.dragging || e.pointerId !== steer.id) return;
+    steer.dragging = false;
+    const now = performance.now(), click = steer.moved < 8 && now - steer.t0 < 700;
+    camState.yawVel = click || now - steer.lastT > 100 ? 0 : clamp(steer.vx, -1.6, 1.6);
+    if (click && e.type === 'pointerup' && (app.mode === 'intro' || app.mode === 'end')) begin();
+  };
+  addEventListener('pointerup', endDrag);
+  addEventListener('pointercancel', endDrag);
+  const TURN_KEYS = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down' };
+  addEventListener('keyup', (e) => { const t = TURN_KEYS[e.key]; if (t) steer.keys.delete(t); });
+  addEventListener('blur', () => steer.keys.clear());
+  addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if (e.code === 'Backquote' || k === '`') { e.preventDefault(); if (!e.repeat) setOwner(!app.owner); return; }
+    if (k === 'f' || k === 'F') { toggleFullscreen(); return; }
+    // owner: seek with [ ] (or Shift + arrows)
+    if (app.owner && (k === '[' || k === ']' || (e.shiftKey && (k === 'ArrowLeft' || k === 'ArrowRight')))) {
+      seekBy(k === '[' || k === 'ArrowLeft' ? -5 : 5); e.preventDefault(); return;
+    }
+    // everyone: turn and tilt with the arrows or WASD
+    const t = TURN_KEYS[k];
+    if (t && !(e.target instanceof HTMLInputElement)) {
+      steer.keys.add(t); touched(t === 'up' || t === 'down'); e.preventDefault();
+      if (!app.owner && (app.mode === 'intro' || app.mode === 'end') && !e.repeat) begin();
+      return;
+    }
+    if (!app.owner) {
+      if ((app.mode === 'intro' || app.mode === 'end') && !e.repeat && !['Escape', 'Tab', 'Shift', 'Control', 'Alt', 'Meta'].includes(k)) begin();
+      return;
+    }
+    // the owner's keys
+    if (k === ' ' && !(e.target instanceof HTMLButtonElement)) { togglePlay(); e.preventDefault(); }
+    else if (k === 'm' || k === 'M') toggleMic();
+    else if (k === 'h' || k === 'H') ui.hint.classList.remove('in');
+  });
+
+  // ---------- test hooks ----------
+  window.__meadow = {
+    renderer, camera, settings, music, pano, S, bgMat, camState, clock, app, audio, parts: { bg, grass, flowers, petals },
+    get director() { return app.dir; },
+    // point the view (and the glide) this way: yaw in radians, growing to the left
+    look(yaw = 0, pitch = 0) { camState.yaw = camState.heading = wrapPI(yaw); camState.pitch = pitch; camState.yawVel = 0; camState.lastInput = performance.now(); },
+    freeze(v) { app.frozen = v; },
+    // how long each shader takes to compile here (forces fresh programs; for checking the Direct3D path)
+    timeCompile() {
+      const buf = new Uint8Array(4), out = {};
+      const sync = () => renderer.readRenderTargetPixels(sceneRT, 0, 0, 1, 1, buf);
+      const all = { bg: bgMat, grass: grassMat, flower: flowerMat, petal: petalMat };
+      for (const [k, mat] of Object.entries(all)) {
+        for (const m of Object.values(all)) m.visible = m === mat;
+        mat.defines = { ...mat.defines, RECOMPILE: Math.floor(Math.random() * 1e9) }; mat.needsUpdate = true;
+        const t0 = performance.now(); step(performance.now(), 0); sync(); out[k] = Math.round(performance.now() - t0);
+      }
+      for (const m of Object.values(all)) m.visible = true;
+      const pm = pano.material;
+      pm.defines = { ...pm.defines, RECOMPILE: Math.floor(Math.random() * 1e9) }; pm.needsUpdate = true;
+      const t0 = performance.now(); pano.setup(pano.pxPerRad, camState.yaw); pano.step();
+      renderer.readRenderTargetPixels(pano.rt, 0, 0, 1, 1, buf); out.pano = Math.round(performance.now() - t0);
+      while (!pano.step()) { /* finish the panorama again */ }
+      bgMat.uniforms.tPano.value = pano.rt.texture;
+      return out;
+    },
+    // finish the mountain panorama right now (testing in a hidden tab, where frames don't run)
+    finishPano() {
+      const gl = renderer.getContext();
+      while (!pano.step()) gl.finish();
+      if (!started) reveal(performance.now());
+      return { w: pano.w, h: pano.h, jobs: pano.jobs.length };
+    },
+    renderAt(z, T = 10) { camState.z = z; step(T * 1000, 0); renderer.getContext().finish(); },
+    // top-down map of lakes and flower drifts, `range` metres tall, saved like shot()
+    async mapShot(name, range = 300, z) {
+      bgMat.uniforms.uDebug.value = range;
+      bgMat.uniforms.uMapRes.value.set(sceneRT.width, sceneRT.height);
+      bgMat.defines = { ...bgMat.defines, DEBUG_MAP: 1 }; bgMat.needsUpdate = true;
+      grass.visible = flowers.visible = petals.visible = false;
+      const r = await window.__meadow.shot(name, z);
+      delete bgMat.defines.DEBUG_MAP; bgMat.needsUpdate = true;
+      grass.visible = flowers.visible = petals.visible = true;
+      return r;
+    },
+    // dev server only: render one frame and save it to .claude/shots/<name>
+    shot(name, z, T = 10) {
+      if (z != null) camState.z = z;
+      step(T * 1000, 0);
+      return new Promise((res) => renderer.domElement.toBlob((b) => {
+        fetch(`/__shot?name=${encodeURIComponent(name)}`, { method: 'POST', body: b }).then(() => res(name), () => res('failed'));
+      }, 'image/jpeg', 0.92));
+    },
+    beat(s = 1) { onBeat(s); },
+    setQuality(q) { activeQ = q; resScale = 1; applyQuality(); },
+    get started() { return started; },
+    get compiled() { return compiled; },
+    tick(now) { frame(now ?? performance.now()); },   // one frame by hand (a hidden tab gets no animation frames)
+    // run the live simulation forward by hand: `beats` = times (s from now) at which to fire a beat
+    advance(seconds, { fps = 30, beats = [], from = 20 } = {}) {
+      const n = Math.round(seconds * fps); let k = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / fps;
+        while (k < beats.length && beats[k] <= t) { onBeat(1); k++; }
+        step((from + t) * 1000, 1 / fps);
+      }
+    },
+    // play the song's direction (silently) from song time t0 for `seconds`, frame by frame; null t0 lets go
+    playAt(t0, seconds = 0, { fps = 30, from = 50 } = {}) {
+      if (t0 == null) { app.forcedT = null; app.mode = 'intro'; return; }
+      app.mode = 'play';
+      if (app.dir) { camState.v = app.dir.at(t0).speed * settings.speed; }
+      const n = Math.max(1, Math.round(seconds * fps));
+      for (let i = 0; i < n; i++) { app.forcedT = t0 + i / fps; step((from + i / fps) * 1000, i ? 1 / fps : 0); }
+      return app.dir ? { ...app.dir.at(app.forcedT) } : null;
+    },
+  };
+}
+
+main().catch((err) => {
+  console.error(err);
+  ui.loader.hidden = false; ui.loader.classList.remove('out');
+  ui.loader.textContent = 'Something went wrong while painting the meadow. Reload to try again.';
+});
+</script>
+</body>
+</html>
