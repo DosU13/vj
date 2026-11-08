@@ -77,6 +77,19 @@
     white-space: nowrap; color: var(--accent);
   }
   .tag:empty { display: none; }
+  .link { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-faint); letter-spacing: 0.01em; }
+  .link:empty { display: none; }
+  .share {
+    all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: calc(100% - 28px); margin: 10px 14px 0; padding: 10px 14px; border-radius: 12px; cursor: pointer;
+    font-size: 13px; font-weight: 600; color: var(--ink);
+    background: rgba(255, 255, 255, 0.07); border: 1px solid var(--glass-edge);
+    transition: background-color 0.15s ease;
+  }
+  .share[hidden] { display: none; }
+  .share:hover { background: rgba(255, 255, 255, 0.13); }
+  .share:focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
+  .share svg { width: 15px; height: 15px; flex: none; }
   @media (max-width: 440px) {
     .item { grid-template-columns: auto 1fr; }
     .tag { grid-column: 2; margin-top: 6px; }
@@ -90,7 +103,7 @@
   .leaving .item:not([aria-busy="true"]) { opacity: 0.4; }
 
   @media (prefers-reduced-motion: reduce) {
-    #vj, .item, .dot { transition: none; }
+    #vj, .item, .dot, .share { transition: none; }
     .panel { animation: none; }
   }
 </style>
@@ -102,17 +115,27 @@
   <div class="panel">
     <p class="eyebrow" id="menu-title">Choose a VJ</p>
     <ul class="list" id="menu-list"></ul>
+    <button class="share" id="share" type="button" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4L12 18.4"/></svg>
+      <span id="share-label"></span>
+    </button>
     <p class="hint"><span class="fine">Esc or click outside to close</span><span class="coarse">Tap outside to close</span></p>
   </div>
 </dialog>
 
 <script>
-  // Every VJ this page can show. Plain index.html opens the first one; index.html?vj=<id> opens the others.
+  // Every VJ this page can show, oldest first. Plain index.html opens the newest (the last one here), so a
+  // VJ added at the end becomes the default.
+  // Short links: a VJ's number in this list or its alias. vj.doslan.com/2 opens Europe, and so do /europe,
+  // ?2 and ?vj=europe. The number pages (1/index.html, 2/index.html, …) and 404.html forward here.
+  // Adding a VJ: put it at the end, and copy the last number page (3/ to 4/) with its id and words, so a
+  // shared link shows a proper preview. Without that page 404.html still forwards /4 here.
   // Each VJ page loads ../vj-bridge.js in its head (see the top of that file), so a right-click or
   // long press inside it reaches the menu.
   const VJS = [
     {
       id: 'twilight-lantern-forest',
+      alias: 'twilight',
       title: 'Twilight Lantern Forest',
       blurb: 'Bass-reactive forest walk',
       src: 'twilight-lantern-forest/twilight-lantern-forest.html',
@@ -120,21 +143,43 @@
     },
     {
       id: 'europe',
+      alias: 'europe',
       title: 'Europe',
       blurb: 'Summer walk through nine cities',
       src: 'europe/europe.html',
       accent: '#ffb25c',
+    },
+    {
+      id: 'wildflower-meadow',
+      alias: 'meadow',
+      title: 'Wildflower Meadow',
+      blurb: 'A waltz through flowers, lakes and snowy peaks',
+      src: 'wildflower-meadow/wildflower-meadow.html',
+      accent: '#ff9ec4',
     },
   ];
 
   const frame = document.getElementById('vj');
   const menu = document.getElementById('menu');
   const list = document.getElementById('menu-list');
+  const shareBtn = document.getElementById('share');
+  const shareLabel = document.getElementById('share-label');
 
-  const current = VJS.find((vj) => vj.id === new URLSearchParams(location.search).get('vj')) || VJS.at(-1);
+  // ---------- which VJ, and its short link ----------
+  const ROOT = new URL('./', location.href);           // this page's folder (kept before the address is shortened)
+  const served = /^https?:$/.test(location.protocol);  // from disk there are no number pages to link to
+  const params = new URLSearchParams(location.search);
+  const asked = (params.get('vj') ?? [...params.keys()][0] ?? '').trim().toLowerCase();   // ?vj=2 or just ?2
+  const byKey = (key) => (/^\d+$/.test(key) ? VJS[+key - 1] : VJS.find((vj) => vj.id === key || vj.alias === key));
+  const DEFAULT_VJ = VJS[VJS.length - 1];
+  const current = byKey(asked) || DEFAULT_VJ;
+  const shortUrl = (vj) => new URL(String(VJS.indexOf(vj) + 1), ROOT);   // https://vj.doslan.com/2
+  const shortText = (vj) => shortUrl(vj).host + shortUrl(vj).pathname;    // vj.doslan.com/2, short enough to type
   document.title = current.title;
   frame.title = current.title;
-  frame.src = current.src;
+  frame.src = new URL(current.src, ROOT).href;
+  // the address bar shows the short link (an unknown one falls back to the plain address)
+  if (served && asked) history.replaceState(null, '', (byKey(asked) ? shortUrl(current).pathname : ROOT.pathname) + location.hash);
 
   // ---------- menu ----------
   for (const vj of VJS) {
@@ -142,9 +187,10 @@
     item.type = 'button';
     item.className = 'item';
     item.style.setProperty('--accent', vj.accent || '#ffffff');
-    item.innerHTML = '<span class="dot"></span><span><span class="name"></span><span class="blurb"></span></span><span class="tag"></span>';
+    item.innerHTML = '<span class="dot"></span><span><span class="name"></span><span class="blurb"></span><span class="link"></span></span><span class="tag"></span>';
     item.querySelector('.name').textContent = vj.title;
     item.querySelector('.blurb').textContent = vj.blurb || '';
+    if (served) item.querySelector('.link').textContent = shortText(vj);
     if (vj === current) {
       item.setAttribute('aria-current', 'true');
       item.querySelector('.tag').textContent = 'Now playing';
@@ -171,17 +217,37 @@
     frame.focus(); // keys go back to the VJ
   });
 
-  // Picking another VJ reloads the page with it.
+  // Picking another VJ reloads this page with it (straight here, not through its number page: one
+  // same-site load keeps the click, so the next VJ may start its music by itself).
   function pick(vj, item) {
     if (vj === current) return closeMenu();
     menu.classList.add('leaving');
     item.setAttribute('aria-busy', 'true');
     item.querySelector('.tag').textContent = 'Loading…';
-    const url = new URL(location.href);
-    url.hash = '';
-    if (vj === VJS[0]) url.searchParams.delete('vj');
-    else url.searchParams.set('vj', vj.id);
-    location.assign(url.href);
+    location.assign(new URL((served ? '' : 'index.html') + '?vj=' + vj.id, ROOT).href);
+  }
+
+  // ---------- sharing what's playing ----------
+  // On a phone the share sheet opens (to send the link in a chat); on a computer the link is copied.
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const shareText = () => (touch && navigator.share ? `Share ${current.title}` : `Copy link to ${current.title}`);
+  let shareTimer = 0;
+  function flashShare(text) {
+    shareLabel.textContent = text;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => { shareLabel.textContent = shareText(); }, 2200);
+  }
+  if (served) {
+    shareBtn.hidden = false;
+    shareLabel.textContent = shareText();
+    shareBtn.addEventListener('click', async () => {
+      const url = shortUrl(current).href;
+      if (touch && navigator.share) {
+        try { await navigator.share({ title: current.title, text: current.blurb, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+      }
+      try { await navigator.clipboard.writeText(url); flashShare('Link copied: ' + shortText(current)); }
+      catch { flashShare(shortText(current)); }   // no clipboard here: show the link, short enough to type
+    });
   }
 
   // A click on the empty space around the panel closes the menu (but not the one that just opened it).
@@ -217,7 +283,7 @@
       const win = frame.contentWindow;
       if (!win.__vjBridge) {
         const script = win.document.createElement('script');
-        script.src = new URL('vj-bridge.js', location.href).href;
+        script.src = new URL('vj-bridge.js', ROOT).href;
         (win.document.head || win.document.documentElement).append(script);
       }
     } catch {

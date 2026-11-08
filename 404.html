@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>VJ</title>
+<script>
+  // GitHub Pages shows this page for any address it doesn't have, so a short link without a page of its
+  // own (vj.doslan.com/meadow, /twilight, or /4 for a new VJ) still finds its VJ: the first part of the
+  // path goes to the VJ menu page, which knows every VJ by number and name (anything else opens the newest).
+  (() => {
+    const parts = location.pathname.split('/').filter(Boolean);
+    const base = /\.github\.io$/.test(location.hostname) && parts.length ? '/' + parts.shift() + '/' : '/';
+    location.replace(base + (parts.length ? '?vj=' + encodeURIComponent(parts[0]) : '') + location.hash);
+  })();
+</script>
+<style>html, body { height: 100%; margin: 0; background: #000; }</style>
+</head>
+<body>
+<a href="/" style="color: #888; font: 14px system-ui, sans-serif">VJ</a>
+</body>
+</html>
