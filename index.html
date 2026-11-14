@@ -128,8 +128,8 @@
   // VJ added at the end becomes the default.
   // Short links: a VJ's number in this list or its alias. vj.doslan.com/2 opens Europe, and so do /europe,
   // ?2 and ?vj=europe. The number pages (1/index.html, 2/index.html, …) and 404.html forward here.
-  // Adding a VJ: put it at the end, and copy the last number page (3/ to 4/) with its id and words, so a
-  // shared link shows a proper preview. Without that page 404.html still forwards /4 here.
+  // Adding a VJ: put it at the end, and copy the last number page (4/ to 5/) with its id and words, so a
+  // shared link shows a proper preview. Without that page 404.html still forwards /5 here.
   // Each VJ page loads ../vj-bridge.js in its head (see the top of that file), so a right-click or
   // long press inside it reaches the menu.
   const VJS = [
@@ -164,6 +164,14 @@
       blurb: 'She turns once, at sunset',
       src: 'cleopatra/cleopatra.html',
       accent: '#ff6b7d',
+    },
+    {
+      // no blurb on purpose: nothing in the menu hints at her
+      id: 'forest-anima',
+      alias: 'anima',
+      title: 'Forest Anima',
+      src: 'forest-anima/forest-anima.html',
+      accent: '#f2b552',
     },
   ];
 
