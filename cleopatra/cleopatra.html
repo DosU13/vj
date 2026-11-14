@@ -177,6 +177,7 @@ body:not(.dev) #panel { display: none !important; }
     <button class="btn" type="button" data-opt="filter" aria-pressed="true">Distance</button>
     <button class="btn" type="button" data-opt="stepPrint" aria-pressed="true">Step-print</button>
     <button class="btn" type="button" data-opt="film" aria-pressed="true">Film</button>
+    <button class="btn" type="button" data-opt="mouseLook" aria-pressed="true">Mouse look</button>
   </div>
   <div class="qrow"><span>The turn</span>
     <div class="btns">
@@ -189,7 +190,7 @@ body:not(.dev) #panel { display: none !important; }
       <button type="button" data-q="auto">Auto</button><button type="button" data-q="high">High</button><button type="button" data-q="low">Low</button>
     </div>
   </div>
-  <p class="keys">Drag or <kbd>←</kbd> <kbd>→</kbd> to look · <kbd>Space</kbd> play · <kbd>[</kbd> <kbd>]</kbd> seek · <kbd>F</kbd> fullscreen · <kbd>`</kbd> hide · drop a song to swap it</p>
+  <p class="keys">Move the mouse to look · <kbd>Space</kbd> play · <kbd>[</kbd> <kbd>]</kbd> seek · <kbd>F</kbd> fullscreen · <kbd>`</kbd> hide · drop a song to swap it</p>
 </section>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -249,6 +250,7 @@ const settings = {
   filter: store.get('filter', true) !== false,
   stepPrint: store.get('stepPrint', true) !== false,
   film: store.get('film', true) !== false,
+  mouseLook: store.get('mouseLook', true) !== false,   // the view glances toward the mouse
 };
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -2956,7 +2958,7 @@ async function main() {
     if (app.mode === 'play') return audio.time();
     return -PRELUDE;
   };
-  const look = { yaw: 0, pitch: 0, lastInput: -1e9 };   // the viewer's own glance, on top of the director's
+  const look = { yaw: 0, pitch: 0, ptrX: 0, ptrY: 0, lastInput: -1e9 };   // the viewer's glance toward the mouse, on top of the director's
   const orph = { hold: 0, gone: false, seg: -1, at: 0 };
   let last = performance.now(), started = false;
   const ft = { acc: 0, n: 0, lastCheck: performance.now(), slow: 0 };
@@ -3014,9 +3016,11 @@ async function main() {
     finalMat.uniforms.uLeak.value = settings.film && !reduceMotion ? f.leak : 0;
     finalMat.uniforms.uFocus.value = f.focus;
     finalMat.uniforms.uAperture.value = f.aperture;
-    // the camera: the director's view plus the viewer's own glance, which drifts back when left alone
+    // the camera: the director's view plus the viewer's glance toward the mouse (easing there, as in Europe and
+    // the Twilight forest)
+    const lookOn = settings.mouseLook ? 1 : 0, kl = 1 - Math.exp(-dt * 3);
+    look.yaw += (-look.ptrX * 0.24 * lookOn - look.yaw) * kl; look.pitch += (-look.ptrY * 0.12 * lookOn - look.pitch) * kl;
     const idle = now - look.lastInput;
-    if (!steer.dragging && idle > 2500) { const k = 1 - Math.exp(-dt * 0.7); look.yaw -= look.yaw * k; look.pitch -= look.pitch * k; }
     const sway = reduceMotion ? 0 : 1;
     camera.position.copy(f.cam.pos);
     camera.position.y += sway * (0.012 * Math.sin(T * 0.9) + 0.008 * Math.sin(T * 1.7 + 1));
@@ -3038,7 +3042,7 @@ async function main() {
       camera.getWorldDirection(fwd);
       toHer.set(h.pos.x, h.pos.y + 1.3, h.pos.z).sub(camera.position).normalize();
       const ang = Math.acos(clamp(fwd.dot(toHer), -1, 1));
-      const yours = steer.dragging || idle < 2500;
+      const yours = lookOn > 0 && idle < 2500;
       const within = ang < (6.5 * DEG) * (camera.fov / VFOV);
       if (settings.orpheus && !h.protect && yours && within) orph.hold += dt; else orph.hold = Math.max(0, orph.hold - dt);
       if (orph.hold > 0.5 && !orph.gone) { orph.gone = true; orph.at = t; }
@@ -3208,10 +3212,6 @@ async function main() {
         app.mode = 'prelude'; app.preT0 = performance.now(); app.lastT = -PRELUDE - 1;
         preTimer = setTimeout(() => { if (app.mode === 'prelude') { app.mode = 'play'; audio.el.currentTime = 0; audio.lastMT = -1; audio.el.play().catch(() => {}); } }, PRELUDE * 1000);
       } else { app.mode = 'play'; app.lastT = -1; }
-      if (!app.lookHinted) {
-        app.lookHinted = true;
-        setTimeout(() => { if ((app.mode === 'play' || app.mode === 'prelude') && performance.now() - look.lastInput > 4000) hint(coarse ? 'Drag to look around' : 'Drag, or use the arrow keys, to look around', 5000); }, 5000);
-      }
       return true;
     } catch {
       audio.el.pause();
@@ -3363,41 +3363,18 @@ async function main() {
     const f = [...(e.dataTransfer ? e.dataTransfer.files : [])].find(isAudio);
     if (f) loadFile(f); else toast('Drop an audio file: MP3, M4A, WAV, OGG or FLAC');
   });
-  // ---------- looking around: drag anywhere (a click without dragging starts the evening) ----------
-  // The view moves with the finger: a pixel of drag turns it by one pixel's worth of angle. Let go, and
-  // after a moment the view drifts back to where the evening is looking.
-  const steer = { dragging: false, id: -1, x: 0, y: 0, moved: 0, t0: 0, keys: new Set() };
-  const dragAngle = () => (camera.fov * DEG) / Math.max(1, innerHeight);
-  addEventListener('pointerdown', (e) => {
-    if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {});
-    if (e.button !== 0 || (e.target instanceof Element && e.target.closest('#panel, .endcard .inner'))) return;
-    Object.assign(steer, { dragging: true, id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t0: performance.now() });
-  });
+  // ---------- looking around: the view glances toward the mouse (as in Europe and the Twilight forest) ----------
+  // Where the pointer is on the screen, the view turns a little that way and eases there. A click (off the
+  // panel and the end card's buttons) starts the evening.
+  addEventListener('pointerdown', () => { if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {}); });
   addEventListener('pointermove', (e) => {
-    if (!steer.dragging || e.pointerId !== steer.id) return;
-    const dx = e.clientX - steer.x, dy = e.clientY - steer.y;
-    steer.x = e.clientX; steer.y = e.clientY; steer.moved += Math.abs(dx) + Math.abs(dy);
-    const k = dragAngle();
-    look.yaw = clamp(look.yaw + dx * k, -2.6, 2.6);
-    look.pitch = clamp(look.pitch + dy * k, -0.5, 0.5);
+    look.ptrX = (e.clientX / innerWidth) * 2 - 1; look.ptrY = (e.clientY / innerHeight) * 2 - 1;
     look.lastInput = performance.now();
+  }, { passive: true });
+  addEventListener('pointerup', (e) => {
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest('#panel, .endcard .inner'))) return;
+    if (app.mode === 'intro' || app.mode === 'end') { hideEnd(); begin(); }
   });
-  const endDrag = (e) => {
-    if (!steer.dragging || e.pointerId !== steer.id) return;
-    steer.dragging = false;
-    const click = steer.moved < 8 && performance.now() - steer.t0 < 700;
-    if (click && e.type === 'pointerup' && (app.mode === 'intro' || app.mode === 'end')) { hideEnd(); begin(); }
-  };
-  addEventListener('pointerup', endDrag);
-  addEventListener('pointercancel', endDrag);
-  const TURN_KEYS = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down' };
-  addEventListener('keyup', (e) => { const t = TURN_KEYS[e.key]; if (t) steer.keys.delete(t); });
-  addEventListener('blur', () => steer.keys.clear());
-  setInterval(() => {   // held arrow keys turn the glance
-    if (!steer.keys.size) return;
-    const turn = (steer.keys.has('left') ? 1 : 0) - (steer.keys.has('right') ? 1 : 0), tilt = (steer.keys.has('up') ? 1 : 0) - (steer.keys.has('down') ? 1 : 0);
-    look.yaw = clamp(look.yaw + turn * 0.012, -2.6, 2.6); look.pitch = clamp(look.pitch + tilt * 0.008, -0.5, 0.5); look.lastInput = performance.now();
-  }, 16);
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -3406,12 +3383,6 @@ async function main() {
     if (k === 'f' || k === 'F') { toggleFullscreen(); return; }
     if (app.owner && (k === '[' || k === ']' || (e.shiftKey && (k === 'ArrowLeft' || k === 'ArrowRight')))) {
       seekTo(songTime() + (k === '[' || k === 'ArrowLeft' ? -5 : 5)); e.preventDefault(); return;
-    }
-    const t = TURN_KEYS[k];
-    if (t && !(e.target instanceof HTMLInputElement)) {
-      steer.keys.add(t); e.preventDefault();
-      if (!app.owner && (app.mode === 'intro' || app.mode === 'end') && !e.repeat) begin();
-      return;
     }
     if (!app.owner) {
       if ((app.mode === 'intro' || app.mode === 'end') && !e.repeat && !['Escape', 'Tab', 'Shift', 'Control', 'Alt', 'Meta'].includes(k)) begin();

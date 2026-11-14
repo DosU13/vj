@@ -144,7 +144,7 @@ The camera travels along the east shore and looks out west across the water. She
 ## 6. Seeing her
 
 - **Visibility** is one value the director sets for each moment. It drives everything that hides her: reeds and willow leaves in front of her, gusts of petals, depth of field (she's soft unless the director pulls focus to her for a beat), and haze.
-- **The Orpheus rule.** Drag the view so she's in the centre, hold her there for about half a second, and she dissolves into petals and motes that the wind carries off. She turns up again later, somewhere else. Toward the edges of the view she stays fully visible. With nobody touching the controls, the camera does this on its own once, in verse 2. The rule is off for the breakdown and the turn.
+- **The Orpheus rule.** Glance at her with the mouse so she's in the centre, hold her there for about half a second, and she dissolves into petals and motes that the wind carries off. She turns up again later, somewhere else. Toward the edges of the view she stays fully visible. With nobody touching the controls, the camera does this on its own once, in verse 2. The rule is off for the breakdown and the turn.
 - **Slow motion.** The world has its own clock, apart from the song's. It drops to about 20% for the breakdown and the turn (petals, hair, water and clouds slow down while the song plays on), and dips gently during her other clear glimpses.
 - **Step-printing.** During glimpses her pose updates at 12 fps and leaves a faint smear: the stutter from Wong Kar-wai's films. Only on her; the world stays smooth.
 - **Dolly zoom** at the turn: the camera moves in while the lens widens, so she stays the same size and the world behind her falls away (the *Vertigo* shot).
@@ -176,7 +176,8 @@ The camera travels along the east shore and looks out west across the water. She
 ## 10. Tech
 
 - **One file:** `cleopatra/cleopatra.html`, like the other VJs: three.js 0.160 from jsDelivr, works from disk and on the website, loads `../vj-bridge.js` for the menu.
-- **Copied and adapted from the Meadow:** helpers; the song analysis and its bake tool (`tools/bake.mjs`, so the page works from disk); the director's building blocks (entrances, bars, gust fronts); sky and cloud banks; the mountain panorama; lake shading; grass and flowers; drag to look; the owner panel; the quality manager; test hooks. The Meadow itself isn't changed.
+- **Copied and adapted from the Meadow:** helpers; the song analysis and its bake tool (`tools/bake.mjs`, so the page works from disk); the director's building blocks (entrances, bars, gust fronts); sky and cloud banks; the mountain panorama; lake shading; grass and flowers; the owner panel; the quality manager; test hooks. The Meadow itself isn't changed.
+- **Looking around** (changed 2026-11-14): the mouse look of Europe and Twilight Lantern Forest instead of the Meadow's drag. The view glances a little toward wherever the pointer is (up to about 14° across and 7° up or down) and eases there; the owner panel's *Mouse look* switch turns it off.
 - **New parts:**
   - her figure, with its hair, dress and scarf simulations;
   - the phase director (glimpses, almost-turns, the turn, the vanishing, the reflection) and its turn picker;
